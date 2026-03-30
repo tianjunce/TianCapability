@@ -1,0 +1,2 @@
+"""Capability service application package."""
+

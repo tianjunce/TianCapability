@@ -1,0 +1,58 @@
+name: get_weather
+kind: tool
+description: 获取指定城市的天气信息
+
+method: POST
+path: /capabilities/get_weather
+timeout_seconds: 10
+supports_progress: true
+
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    city:
+      type: string
+      minLength: 1
+    date:
+      type: string
+      minLength: 1
+  required:
+    - city
+
+output_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    city:
+      type: string
+    date:
+      type: string
+    city_code:
+      type: string
+    weather:
+      type: object
+      additionalProperties: false
+      properties:
+        weather:
+          type: string
+        temp_current:
+          type: string
+        temp_high_day:
+          type: string
+        temp_low_night:
+          type: string
+      required:
+        - weather
+        - temp_current
+        - temp_high_day
+        - temp_low_night
+    summary:
+      type: string
+  required:
+    - city
+    - date
+    - city_code
+    - weather
+    - summary
+
