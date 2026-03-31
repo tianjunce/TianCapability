@@ -22,3 +22,6 @@ dist/
 # Coverage
 .coverage
 coverage.xml
+
+# Runtime cache
+app/capabilities/get_weather/.cache/

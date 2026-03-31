@@ -13,6 +13,7 @@
 ## 平台文档
 
 - 平台开发规范：[`docs/README_CAPABILITY_DEVELOPMENT.md`](docs/README_CAPABILITY_DEVELOPMENT.md)
+- skill 开发规范：[`docs/README_SKILL_DEVELOPMENT.md`](docs/README_SKILL_DEVELOPMENT.md)
 - 示例 capability：[`app/capabilities/get_weather/README.md`](app/capabilities/get_weather/README.md)
 
 ## 当前能力

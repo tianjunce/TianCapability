@@ -4,7 +4,7 @@ description: 获取指定城市的天气信息
 
 method: POST
 path: /capabilities/get_weather
-timeout_seconds: 10
+timeout_seconds: 20
 supports_progress: true
 
 input_schema:
@@ -28,6 +28,8 @@ output_schema:
       type: string
     date:
       type: string
+    matched_date:
+      type: string
     city_code:
       type: string
     weather:
@@ -47,6 +49,33 @@ output_schema:
         - temp_current
         - temp_high_day
         - temp_low_night
+    forecast_days:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          date:
+            type: string
+          weekday:
+            type: string
+          weather:
+            type: string
+          temp_current:
+            type: string
+          temp_high_day:
+            type: string
+          temp_low_night:
+            type: string
+        required:
+          - date
+          - weekday
+          - weather
+          - temp_current
+          - temp_high_day
+          - temp_low_night
+    source:
+      type: string
     summary:
       type: string
   required:
@@ -55,4 +84,3 @@ output_schema:
     - city_code
     - weather
     - summary
-
