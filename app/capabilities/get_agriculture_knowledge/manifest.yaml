@@ -1,0 +1,55 @@
+name: get_agriculture_knowledge
+kind: tool
+description: Agriculture knowledge lookup for rice, morel, and dzjym
+method: POST
+path: /capabilities/get_agriculture_knowledge
+timeout_seconds: 20
+supports_progress: true
+
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    kb_type:
+      type: string
+      enum:
+        - rice
+        - morel
+        - dzjym
+    item_name:
+      type: string
+      minLength: 1
+    query:
+      type: string
+      minLength: 1
+  required:
+    - kb_type
+    - query
+
+output_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    result:
+      type: string
+    kb_type:
+      type: string
+      enum:
+        - rice
+        - morel
+        - dzjym
+    item_name:
+      anyOf:
+        - type: string
+        - type: "null"
+    answer:
+      type: string
+    reference_list:
+      type: array
+      items: {}
+    raw: {}
+  required:
+    - result
+    - kb_type
+    - answer
+    - reference_list
