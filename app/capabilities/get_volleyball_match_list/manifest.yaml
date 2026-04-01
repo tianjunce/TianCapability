@@ -1,0 +1,115 @@
+name: get_volleyball_match_list
+kind: tool
+description: 获取排球比赛列表、比赛日期和指定日期的球员统计信息
+
+method: POST
+path: /capabilities/get_volleyball_match_list
+timeout_seconds: 20
+supports_progress: true
+
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    query_type:
+      type: string
+      minLength: 1
+    page_num:
+      type: integer
+      minimum: 1
+    page_size:
+      type: integer
+      minimum: 1
+    match_date:
+      type: string
+      minLength: 1
+
+output_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    query_type:
+      type: string
+      enum:
+        - list
+        - dates
+        - day_stat
+    page_num:
+      type: integer
+      minimum: 1
+    page_size:
+      type: integer
+      minimum: 1
+    total:
+      anyOf:
+        - type: integer
+        - type: number
+        - type: "null"
+    pages:
+      anyOf:
+        - type: integer
+        - type: number
+        - type: "null"
+    available_dates:
+      type: array
+      items:
+        type: string
+    matches:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          id: {}
+          name:
+            anyOf:
+              - type: string
+              - type: "null"
+          team_a_score: {}
+          team_b_score: {}
+          winner:
+            anyOf:
+              - type: string
+              - type: "null"
+          locked: {}
+          scorekeeper_id: {}
+          created_at:
+            anyOf:
+              - type: string
+              - type: "null"
+    match_date:
+      type: string
+    stats:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          player_id: {}
+          player_name:
+            anyOf:
+              - type: string
+              - type: "null"
+          match_date:
+            anyOf:
+              - type: string
+              - type: "null"
+          score_count: {}
+          win_count: {}
+          lose_count: {}
+          scorekeeper_count: {}
+          total_count: {}
+          discount_count: {}
+          result_count: {}
+          actual_count: {}
+          faqiu_count: {}
+          erchuan_count: {}
+          kouqiu_count: {}
+    summary:
+      type: string
+    result:
+      type: string
+  required:
+    - query_type
+    - summary
+    - result
