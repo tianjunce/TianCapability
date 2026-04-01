@@ -25,3 +25,4 @@ coverage.xml
 
 # Runtime cache
 app/capabilities/get_weather/.cache/
+runtime-data/

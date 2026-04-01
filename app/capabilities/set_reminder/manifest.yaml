@@ -1,0 +1,55 @@
+name: set_reminder
+kind: tool
+description: 创建一个精确到日期时间的单次提醒
+
+method: POST
+path: /capabilities/set_reminder
+timeout_seconds: 10
+supports_progress: true
+
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    content:
+      type: string
+      minLength: 1
+    remind_at:
+      type: string
+      minLength: 1
+    note:
+      type: string
+      minLength: 1
+  required:
+    - content
+    - remind_at
+
+output_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    reminder_id:
+      type: string
+    occurrence_id:
+      type: string
+    content:
+      type: string
+    note:
+      anyOf:
+        - type: string
+        - type: "null"
+    remind_at:
+      type: string
+    status:
+      type: string
+      enum:
+        - active
+    summary:
+      type: string
+  required:
+    - reminder_id
+    - occurrence_id
+    - content
+    - remind_at
+    - status
+    - summary

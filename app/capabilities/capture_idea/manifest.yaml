@@ -1,0 +1,56 @@
+name: capture_idea
+kind: tool
+description: 记录一条灵感或碎片想法
+
+method: POST
+path: /capabilities/capture_idea
+timeout_seconds: 10
+supports_progress: true
+
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    title:
+      type: string
+      minLength: 1
+    content:
+      type: string
+      minLength: 1
+    tags:
+      type: array
+      items:
+        type: string
+        minLength: 1
+  required:
+    - content
+
+output_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    idea_id:
+      type: string
+    title:
+      anyOf:
+        - type: string
+        - type: "null"
+    content:
+      type: string
+    tags:
+      type: array
+      items:
+        type: string
+    status:
+      type: string
+      enum:
+        - active
+    summary:
+      type: string
+  required:
+    - idea_id
+    - title
+    - content
+    - tags
+    - status
+    - summary

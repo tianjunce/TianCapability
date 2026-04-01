@@ -1,0 +1,104 @@
+name: manage_birthday
+kind: tool
+description: 记录一个生日，并为下一次生日生成前7天和前1天提醒
+
+method: POST
+path: /capabilities/manage_birthday
+timeout_seconds: 10
+supports_progress: true
+
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    name:
+      type: string
+      minLength: 1
+    birthday:
+      type: string
+      minLength: 1
+    calendar_type:
+      type: string
+      enum:
+        - solar
+        - lunar
+    birth_year:
+      type: integer
+      minimum: 1
+      maximum: 9999
+    is_leap_month:
+      type: boolean
+    notes:
+      type: string
+      minLength: 1
+  required:
+    - name
+    - birthday
+
+output_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    birthday_id:
+      type: string
+    name:
+      type: string
+    birthday:
+      type: string
+    calendar_type:
+      type: string
+      enum:
+        - solar
+        - lunar
+    birth_year:
+      anyOf:
+        - type: integer
+        - type: "null"
+    is_leap_month:
+      type: boolean
+    notes:
+      anyOf:
+        - type: string
+        - type: "null"
+    status:
+      type: string
+      enum:
+        - active
+    next_birthday:
+      type: string
+    occurrence_ids:
+      type: array
+      items:
+        type: string
+    reminder_plan:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          stage:
+            type: string
+          label:
+            type: string
+          remind_at:
+            type: string
+          birthday_date:
+            type: string
+        required:
+          - stage
+          - label
+          - remind_at
+          - birthday_date
+    summary:
+      type: string
+  required:
+    - birthday_id
+    - name
+    - birthday
+    - calendar_type
+    - is_leap_month
+    - status
+    - next_birthday
+    - occurrence_ids
+    - reminder_plan
+    - summary

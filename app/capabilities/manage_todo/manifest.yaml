@@ -1,0 +1,89 @@
+name: manage_todo
+kind: tool
+description: 创建一条待办事项，并在存在截止时间时生成提醒计划
+
+method: POST
+path: /capabilities/manage_todo
+timeout_seconds: 10
+supports_progress: true
+
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    title:
+      type: string
+      minLength: 1
+    notes:
+      type: string
+      minLength: 1
+    deadline:
+      type: string
+      minLength: 1
+    progress_percent:
+      type: integer
+      minimum: 0
+      maximum: 100
+    difficulty:
+      type: string
+      minLength: 1
+  required:
+    - title
+
+output_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    todo_id:
+      type: string
+    title:
+      type: string
+    notes:
+      anyOf:
+        - type: string
+        - type: "null"
+    deadline:
+      anyOf:
+        - type: string
+        - type: "null"
+    progress_percent:
+      anyOf:
+        - type: integer
+        - type: "null"
+    difficulty:
+      anyOf:
+        - type: string
+        - type: "null"
+    status:
+      type: string
+      enum:
+        - open
+    occurrence_ids:
+      type: array
+      items:
+        type: string
+    reminder_plan:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          stage:
+            type: string
+          label:
+            type: string
+          remind_at:
+            type: string
+        required:
+          - stage
+          - label
+          - remind_at
+    summary:
+      type: string
+  required:
+    - todo_id
+    - title
+    - status
+    - occurrence_ids
+    - reminder_plan
+    - summary

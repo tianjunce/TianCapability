@@ -1,0 +1,1 @@
+"""Birthday management capability."""
