@@ -33,6 +33,7 @@ class TodoServiceTests(unittest.TestCase):
             occurrences_path = Path(temp_dir) / "reminders" / "occurrences.json"
 
         self.assertEqual(result["status"], "open")
+        self.assertEqual(result["action"], "create")
         self.assertEqual(result["title"], "写周报")
         self.assertEqual(result["occurrence_ids"], [])
         self.assertEqual(result["reminder_plan"], [])
@@ -63,6 +64,7 @@ class TodoServiceTests(unittest.TestCase):
             occurrences = json.loads(occurrences_path.read_text(encoding="utf-8"))
 
         self.assertEqual(result["deadline"], "2099-04-09T09:00:00")
+        self.assertEqual(result["action"], "create")
         self.assertEqual(len(result["occurrence_ids"]), 4)
         self.assertEqual(len(result["reminder_plan"]), 4)
         self.assertEqual(result["reminder_plan"][0]["stage"], "remaining_50_percent")
@@ -87,6 +89,250 @@ class TodoServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(context.exception.code, "invalid_progress_percent")
+
+    def test_list_todos_returns_sorted_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            service = TodoService()
+            service.create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+            service.create_todo(
+                user_id="user-1",
+                title="交作业",
+                deadline="2099-04-05 09:00",
+            )
+
+            result = service.list_todos(user_id="user-1")
+
+        self.assertEqual(result["action"], "list")
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["todos"][0]["title"], "交作业")
+        self.assertEqual(result["todos"][1]["title"], "写周报")
+
+    def test_complete_todo_updates_status_and_cancels_pending_occurrences(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            return_value=datetime(2099, 4, 1, 9, 0, 0),
+        ):
+            service = TodoService()
+            created = service.create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+
+            result = service.complete_todo(
+                user_id="user-1",
+                todo_id=created["todo_id"],
+            )
+
+            todos_path = Path(temp_dir) / "manage_todo" / "todos.json"
+            occurrences_path = Path(temp_dir) / "reminders" / "occurrences.json"
+            todos = json.loads(todos_path.read_text(encoding="utf-8"))
+            occurrences = json.loads(occurrences_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result["action"], "complete")
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(todos[0]["status"], "completed")
+        self.assertTrue(all(item["status"] == "cancelled" for item in occurrences))
+
+    def test_update_todo_rebuilds_future_occurrences(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 9, 0, 0),
+                datetime(2099, 4, 2, 9, 0, 0),
+                datetime(2099, 4, 2, 9, 0, 0),
+            ],
+        ):
+            service = TodoService()
+            created = service.create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+
+            result = service.update_todo(
+                user_id="user-1",
+                todo_id=created["todo_id"],
+                deadline="2099-04-10 09:00",
+                notes="更新版",
+            )
+
+            todos_path = Path(temp_dir) / "manage_todo" / "todos.json"
+            occurrences_path = Path(temp_dir) / "reminders" / "occurrences.json"
+            todos = json.loads(todos_path.read_text(encoding="utf-8"))
+            occurrences = json.loads(occurrences_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["deadline"], "2099-04-10T09:00:00")
+        self.assertEqual(todos[0]["deadline"], "2099-04-10T09:00:00")
+        self.assertEqual(len(occurrences), 8)
+        self.assertEqual(sum(1 for item in occurrences if item["status"] == "cancelled"), 4)
+        self.assertEqual(sum(1 for item in occurrences if item["status"] == "pending"), 4)
+
+    def test_update_todo_supports_unique_title(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 9, 0, 0),
+                datetime(2099, 4, 2, 9, 0, 0),
+                datetime(2099, 4, 2, 9, 0, 0),
+            ],
+        ):
+            service = TodoService()
+            service.create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+
+            result = service.update_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-10 09:00",
+                notes="更新版",
+            )
+
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["deadline"], "2099-04-10T09:00:00")
+        self.assertEqual(result["title"], "写周报")
+
+    def test_update_todo_rejects_ambiguous_title(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            return_value=datetime(2099, 4, 1, 9, 0, 0),
+        ):
+            service = TodoService()
+            service.create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+            service.create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-10 09:00",
+            )
+
+            with self.assertRaises(TodoValidationError) as context:
+                service.update_todo(
+                    user_id="user-1",
+                    title="写周报",
+                    notes="更新版",
+                )
+
+        self.assertEqual(context.exception.code, "ambiguous_todo")
+
+    def test_delete_todo_marks_deleted_and_hides_from_default_list(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 9, 0, 0),
+                datetime(2099, 4, 1, 10, 0, 0),
+            ],
+        ):
+            service = TodoService()
+            created = service.create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+
+            result = service.delete_todo(
+                user_id="user-1",
+                todo_id=created["todo_id"],
+            )
+            listed = service.list_todos(user_id="user-1")
+            deleted_only = service.list_todos(user_id="user-1", status="deleted")
+
+        self.assertEqual(result["action"], "delete")
+        self.assertEqual(result["status"], "deleted")
+        self.assertEqual(listed["total"], 0)
+        self.assertEqual(deleted_only["total"], 1)
+
+    def test_delete_todo_supports_unique_title(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 9, 0, 0),
+                datetime(2099, 4, 1, 10, 0, 0),
+            ],
+        ):
+            service = TodoService()
+            service.create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+
+            result = service.delete_todo(
+                user_id="user-1",
+                title="写周报",
+            )
+
+        self.assertEqual(result["action"], "delete")
+        self.assertEqual(result["status"], "deleted")
+        self.assertEqual(result["title"], "写周报")
+
+    def test_delete_todo_rejects_ambiguous_title(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            return_value=datetime(2099, 4, 1, 9, 0, 0),
+        ):
+            service = TodoService()
+            service.create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+            service.create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-10 09:00",
+            )
+
+            with self.assertRaises(TodoValidationError) as context:
+                service.delete_todo(
+                    user_id="user-1",
+                    title="写周报",
+                )
+
+        self.assertEqual(context.exception.code, "ambiguous_todo")
 
 
 class ManageTodoHandlerTests(unittest.TestCase):
@@ -123,7 +369,238 @@ class ManageTodoHandlerTests(unittest.TestCase):
             todos_path = Path(temp_dir) / "manage_todo" / "todos.json"
             todos = json.loads(todos_path.read_text(encoding="utf-8"))
 
+        self.assertEqual(payload["action"], "create")
         self.assertEqual(payload["status"], "open")
         self.assertEqual(payload["title"], "写周报")
         self.assertEqual(len(payload["occurrence_ids"]), 4)
         self.assertEqual(len(todos), 1)
+
+    def test_handle_lists_todos(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            TodoService().create_todo(
+                user_id="user-1",
+                title="写周报",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "list",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "list")
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["todos"][0]["title"], "写周报")
+
+    def test_handle_updates_todo_by_title(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 9, 0, 0),
+                datetime(2099, 4, 2, 9, 0, 0),
+                datetime(2099, 4, 2, 9, 0, 0),
+            ],
+        ):
+            TodoService().create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "update",
+                        "title": "写周报",
+                        "deadline": "2099-04-10 09:00",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "update")
+        self.assertEqual(payload["deadline"], "2099-04-10T09:00:00")
+
+    def test_handle_deletes_todo_by_title(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 9, 0, 0),
+                datetime(2099, 4, 1, 10, 0, 0),
+            ],
+        ):
+            TodoService().create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "delete",
+                        "title": "写周报",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "delete")
+        self.assertEqual(payload["status"], "deleted")
+        self.assertEqual(payload["title"], "写周报")
+
+    def test_handle_completes_todo(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            return_value=datetime(2099, 4, 1, 9, 0, 0),
+        ):
+            created = TodoService().create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "complete",
+                        "todo_id": created["todo_id"],
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "complete")
+        self.assertEqual(payload["status"], "completed")
+
+    def test_handle_updates_todo(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 9, 0, 0),
+                datetime(2099, 4, 2, 9, 0, 0),
+            ],
+        ):
+            created = TodoService().create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "update",
+                        "todo_id": created["todo_id"],
+                        "difficulty": "high",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "update")
+        self.assertEqual(payload["difficulty"], "high")
+
+    def test_handle_deletes_todo(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.todo_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 9, 0, 0),
+                datetime(2099, 4, 1, 10, 0, 0),
+            ],
+        ):
+            created = TodoService().create_todo(
+                user_id="user-1",
+                title="写周报",
+                deadline="2099-04-09 09:00",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "delete",
+                        "todo_id": created["todo_id"],
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "delete")
+        self.assertEqual(payload["status"], "deleted")
+
+    def test_handle_batch_creates_todos(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "create",
+                        "items": [
+                            {
+                                "title": "写周报",
+                            },
+                            {
+                                "title": "交作业",
+                                "difficulty": "high",
+                            },
+                        ],
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "create")
+        self.assertTrue(payload["batch"])
+        self.assertEqual(payload["success_count"], 2)
+        self.assertEqual(payload["failure_count"], 0)

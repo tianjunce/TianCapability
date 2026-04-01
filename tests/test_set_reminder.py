@@ -72,6 +72,7 @@ class ReminderServiceTests(unittest.TestCase):
             reminders = json.loads(reminders_path.read_text(encoding="utf-8"))
             occurrences = json.loads(occurrences_path.read_text(encoding="utf-8"))
 
+        self.assertEqual(result["action"], "create")
         self.assertEqual(result["status"], "active")
         self.assertEqual(result["content"], "交电费")
         self.assertEqual(len(reminders), 1)
@@ -92,6 +93,144 @@ class ReminderServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(context.exception.code, "reminder_in_past")
+
+    def test_list_reminders_returns_sorted_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            service = ReminderService()
+            service.create_reminder(
+                user_id="user-1",
+                content="开会",
+                remind_at="2099-04-02 10:00",
+            )
+            service.create_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-02 09:00",
+            )
+
+            result = service.list_reminders(user_id="user-1")
+
+        self.assertEqual(result["action"], "list")
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["reminders"][0]["content"], "交电费")
+        self.assertEqual(result["reminders"][1]["content"], "开会")
+
+    def test_cancel_reminder_updates_reminder_and_occurrence_statuses(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            service = ReminderService()
+            created = service.create_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-02 09:00",
+            )
+
+            result = service.cancel_reminder(
+                user_id="user-1",
+                reminder_id=created["reminder_id"],
+            )
+
+            reminders_path = Path(temp_dir) / "set_reminder" / "reminders.json"
+            occurrences_path = Path(temp_dir) / "reminders" / "occurrences.json"
+            reminders = json.loads(reminders_path.read_text(encoding="utf-8"))
+            occurrences = json.loads(occurrences_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result["action"], "cancel")
+        self.assertEqual(result["status"], "cancelled")
+        self.assertEqual(len(result["cancelled_occurrence_ids"]), 1)
+        self.assertEqual(reminders[0]["status"], "cancelled")
+        self.assertEqual(occurrences[0]["status"], "cancelled")
+
+    def test_update_reminder_rebuilds_pending_occurrence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            service = ReminderService()
+            created = service.create_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-02 09:00",
+            )
+
+            result = service.update_reminder(
+                user_id="user-1",
+                reminder_id=created["reminder_id"],
+                remind_at="2099-04-02 10:00",
+                note="改到十点",
+            )
+
+            reminders_path = Path(temp_dir) / "set_reminder" / "reminders.json"
+            occurrences_path = Path(temp_dir) / "reminders" / "occurrences.json"
+            reminders = json.loads(reminders_path.read_text(encoding="utf-8"))
+            occurrences = json.loads(occurrences_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["status"], "active")
+        self.assertEqual(result["remind_at"], "2099-04-02T10:00:00")
+        self.assertEqual(reminders[0]["remind_at"], "2099-04-02T10:00:00")
+        self.assertEqual(len(occurrences), 2)
+        self.assertEqual(occurrences[0]["status"], "cancelled")
+        self.assertEqual(occurrences[1]["status"], "pending")
+        self.assertEqual(occurrences[1]["remind_at"], "2099-04-02T10:00:00")
+
+    def test_update_reminder_supports_unique_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            service = ReminderService()
+            service.create_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-02 09:00",
+            )
+
+            result = service.update_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-02 10:00",
+            )
+
+        self.assertEqual(result["action"], "update")
+        self.assertEqual(result["status"], "active")
+        self.assertEqual(result["remind_at"], "2099-04-02T10:00:00")
+
+    def test_update_reminder_rejects_ambiguous_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            service = ReminderService()
+            service.create_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-02 09:00",
+            )
+            service.create_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-03 09:00",
+            )
+
+            with self.assertRaises(ReminderValidationError) as context:
+                service.update_reminder(
+                    user_id="user-1",
+                    content="交电费",
+                    note="改一下",
+                )
+
+        self.assertEqual(context.exception.code, "ambiguous_reminder")
 
 
 class SetReminderHandlerTests(unittest.TestCase):
@@ -129,11 +268,164 @@ class SetReminderHandlerTests(unittest.TestCase):
             occurrences_path = Path(temp_dir) / "reminders" / "occurrences.json"
             occurrences = json.loads(occurrences_path.read_text(encoding="utf-8"))
 
+        self.assertEqual(payload["action"], "create")
         self.assertEqual(payload["status"], "active")
         self.assertEqual(payload["content"], "交电费")
         self.assertEqual(payload["remind_at"], "2099-04-02T09:00:00")
         self.assertEqual(len(occurrences), 1)
         self.assertEqual(occurrences[0]["title"], "交电费")
+
+    def test_handle_lists_reminders(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            ReminderService().create_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-02 09:00",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "list",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "list")
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["reminders"][0]["content"], "交电费")
+
+    def test_handle_cancels_reminder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            created = ReminderService().create_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-02 09:00",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "cancel",
+                        "reminder_id": created["reminder_id"],
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "cancel")
+        self.assertEqual(payload["status"], "cancelled")
+
+    def test_handle_updates_reminder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            created = ReminderService().create_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-02 09:00",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "update",
+                        "reminder_id": created["reminder_id"],
+                        "remind_at": "2099-04-02 10:00",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "update")
+        self.assertEqual(payload["status"], "active")
+        self.assertEqual(payload["remind_at"], "2099-04-02T10:00:00")
+
+    def test_handle_updates_reminder_by_content(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            ReminderService().create_reminder(
+                user_id="user-1",
+                content="交电费",
+                remind_at="2099-04-02 09:00",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "update",
+                        "content": "交电费",
+                        "remind_at": "2099-04-02 10:00",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "update")
+        self.assertEqual(payload["status"], "active")
+        self.assertEqual(payload["remind_at"], "2099-04-02T10:00:00")
+
+    def test_handle_batch_create_collects_successes_and_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "create",
+                        "items": [
+                            {
+                                "content": "交电费",
+                                "remind_at": "2099-04-02 09:00",
+                            },
+                            {
+                                "content": "吃饭",
+                                "remind_at": "2000-01-01 09:00",
+                            },
+                        ],
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "create")
+        self.assertTrue(payload["batch"])
+        self.assertEqual(payload["item_count"], 2)
+        self.assertEqual(payload["success_count"], 1)
+        self.assertEqual(payload["failure_count"], 1)
+        self.assertEqual(payload["results"][0]["status"], "success")
+        self.assertEqual(payload["results"][1]["status"], "error")
 
 
 class ReminderDispatchServiceTests(unittest.TestCase):
@@ -181,14 +473,17 @@ class ReminderDispatchServiceTests(unittest.TestCase):
 
             occurrences_path = Path(temp_dir) / "reminders" / "occurrences.json"
             deliveries_path = Path(temp_dir) / "reminders" / "deliveries.json"
+            reminders_path = Path(temp_dir) / "set_reminder" / "reminders.json"
             occurrences = json.loads(occurrences_path.read_text(encoding="utf-8"))
             deliveries = json.loads(deliveries_path.read_text(encoding="utf-8"))
+            reminders = json.loads(reminders_path.read_text(encoding="utf-8"))
 
         self.assertEqual(dispatch_result["processed"], 1)
         self.assertEqual(dispatch_result["delivered"], 1)
         self.assertEqual(dispatch_result["failed"], 0)
         self.assertEqual(occurrences[0]["id"], create_result["occurrence_id"])
         self.assertEqual(occurrences[0]["status"], "delivered")
+        self.assertEqual(reminders[0]["status"], "delivered")
         self.assertEqual(deliveries[0]["status"], "delivered")
         self.assertEqual(deliveries[0]["occurrence_id"], create_result["occurrence_id"])
         self.assertEqual(deliveries[0]["request_payload"]["reminder_source"]["type"], "set_reminder")
@@ -240,14 +535,17 @@ class ReminderDispatchServiceTests(unittest.TestCase):
 
             occurrences_path = Path(temp_dir) / "reminders" / "occurrences.json"
             deliveries_path = Path(temp_dir) / "reminders" / "deliveries.json"
+            reminders_path = Path(temp_dir) / "set_reminder" / "reminders.json"
             occurrences = json.loads(occurrences_path.read_text(encoding="utf-8"))
             deliveries = json.loads(deliveries_path.read_text(encoding="utf-8"))
+            reminders = json.loads(reminders_path.read_text(encoding="utf-8"))
 
         self.assertEqual(dispatch_result["processed"], 1)
         self.assertEqual(dispatch_result["delivered"], 0)
         self.assertEqual(dispatch_result["failed"], 1)
         self.assertEqual(occurrences[0]["status"], "failed")
         self.assertEqual(occurrences[0]["last_error"], "upstream failed")
+        self.assertEqual(reminders[0]["status"], "failed")
         self.assertEqual(deliveries[0]["status"], "failed")
         self.assertEqual(deliveries[0]["error_code"], "notification_send_failed")
 

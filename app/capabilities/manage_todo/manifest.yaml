@@ -1,6 +1,6 @@
 name: manage_todo
 kind: tool
-description: 创建一条待办事项，并在存在截止时间时生成提醒计划
+description: 创建、查询、修改、完成或删除待办事项，并在存在截止时间时维护提醒计划
 
 method: POST
 path: /capabilities/manage_todo
@@ -11,6 +11,17 @@ input_schema:
   type: object
   additionalProperties: false
   properties:
+    action:
+      type: string
+      enum:
+        - create
+        - list
+        - update
+        - complete
+        - delete
+    todo_id:
+      type: string
+      minLength: 1
     title:
       type: string
       minLength: 1
@@ -27,13 +38,57 @@ input_schema:
     difficulty:
       type: string
       minLength: 1
-  required:
-    - title
+    status:
+      type: string
+      enum:
+        - open
+        - completed
+        - deleted
+    items:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          todo_id:
+            type: string
+            minLength: 1
+          title:
+            type: string
+            minLength: 1
+          notes:
+            type: string
+            minLength: 1
+          deadline:
+            type: string
+            minLength: 1
+          progress_percent:
+            type: integer
+            minimum: 0
+            maximum: 100
+          difficulty:
+            type: string
+            minLength: 1
+          status:
+            type: string
+            enum:
+              - open
+              - completed
+              - deleted
 
 output_schema:
   type: object
   additionalProperties: false
   properties:
+    action:
+      type: string
+      enum:
+        - create
+        - list
+        - update
+        - complete
+        - delete
     todo_id:
       type: string
     title:
@@ -58,6 +113,8 @@ output_schema:
       type: string
       enum:
         - open
+        - completed
+        - deleted
     occurrence_ids:
       type: array
       items:
@@ -78,12 +135,42 @@ output_schema:
           - stage
           - label
           - remind_at
+    todos:
+      type: array
+      items:
+        type: object
+    total:
+      type: integer
+      minimum: 0
+    open_total:
+      type: integer
+      minimum: 0
+    completed_total:
+      type: integer
+      minimum: 0
+    completed_at:
+      type: string
+    cancelled_occurrence_ids:
+      type: array
+      items:
+        type: string
+    batch:
+      type: boolean
+    item_count:
+      type: integer
+      minimum: 0
+    success_count:
+      type: integer
+      minimum: 0
+    failure_count:
+      type: integer
+      minimum: 0
+    results:
+      type: array
+      items:
+        type: object
     summary:
       type: string
   required:
-    - todo_id
-    - title
-    - status
-    - occurrence_ids
-    - reminder_plan
+    - action
     - summary

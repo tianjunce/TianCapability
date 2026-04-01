@@ -26,10 +26,10 @@
 
 其中当前业务型 skill 的 v1 状态是：
 
-- `set_reminder`：创建单次提醒，worker 可投递到 AI 助手侧提醒接口
-- `manage_todo`：创建待办，存在截止时间时生成提醒计划
-- `manage_birthday`：创建阳历/农历生日记录，并生成前 7 天 / 前 1 天提醒
-- `capture_idea`：记录灵感正文、可选标题和标签
+- `set_reminder`：创建、查询、修改、取消单次提醒，支持同 action 的批量 `items`
+- `manage_todo`：创建、查询、修改、完成、删除待办，支持同 action 的批量 `items`
+- `manage_birthday`：创建、查询、删除阳历/农历生日记录，支持同 action 的批量 `items`
+- `capture_idea`：记录、查询、删除灵感正文、可选标题和标签，支持同 action 的批量 `items`
 
 ## 当前 worker
 
@@ -67,7 +67,7 @@ conda activate Tian3.10_clean
 python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-当前回归结果：`42` 个测试通过。
+当前回归结果：`68` 个测试通过。
 
 ## 调用示例
 

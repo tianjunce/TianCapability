@@ -10,6 +10,7 @@ from app.services.env_config import get_config_value
 from app.services.repositories import (
     ReminderDeliveryRepository,
     ReminderOccurrenceRepository,
+    ReminderRepository,
 )
 
 
@@ -90,10 +91,12 @@ class ReminderDispatchService:
         *,
         occurrence_repository: ReminderOccurrenceRepository | None = None,
         delivery_repository: ReminderDeliveryRepository | None = None,
+        reminder_repository: ReminderRepository | None = None,
         notification_client: ReminderNotificationClient | None = None,
     ) -> None:
         self.occurrence_repository = occurrence_repository or ReminderOccurrenceRepository()
         self.delivery_repository = delivery_repository or ReminderDeliveryRepository()
+        self.reminder_repository = reminder_repository or ReminderRepository()
         self.notification_client = notification_client or ReminderNotificationClient()
 
     def dispatch_due_occurrences(
@@ -139,6 +142,12 @@ class ReminderDispatchService:
                     delivery_id=delivery_id,
                     error_message=exc.message,
                 )
+                self._sync_source_record_status(
+                    occurrence=occurrence,
+                    status="failed",
+                    updated_at=dispatched_at,
+                    error_message=exc.message,
+                )
                 failed += 1
                 delivery_ids.append(delivery_id)
                 continue
@@ -163,6 +172,12 @@ class ReminderDispatchService:
                 updated_at=dispatched_at,
                 delivery_id=delivery_id,
             )
+            self._sync_source_record_status(
+                occurrence=occurrence,
+                status="delivered",
+                updated_at=dispatched_at,
+                error_message=None,
+            )
             delivered += 1
             delivery_ids.append(delivery_id)
 
@@ -173,6 +188,33 @@ class ReminderDispatchService:
             "failed": failed,
             "delivery_ids": delivery_ids,
         }
+
+    def _sync_source_record_status(
+        self,
+        *,
+        occurrence: dict[str, Any],
+        status: str,
+        updated_at: str,
+        error_message: str | None,
+    ) -> None:
+        if str(occurrence.get("source_type") or "").strip() != "set_reminder":
+            return
+
+        fields: dict[str, Any] = {
+            "status": status,
+            "updated_at": updated_at,
+        }
+        if status == "delivered":
+            fields["delivered_at"] = updated_at
+            fields["last_error"] = None
+        elif error_message:
+            fields["last_error"] = error_message
+
+        self.reminder_repository.update_fields(
+            user_id=str(occurrence.get("user_id") or ""),
+            reminder_id=str(occurrence.get("source_id") or ""),
+            fields=fields,
+        )
 
 
 def _build_reminder_source(occurrence: dict[str, Any]) -> dict[str, str]:

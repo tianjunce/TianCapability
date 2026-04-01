@@ -1,6 +1,6 @@
 name: manage_birthday
 kind: tool
-description: 记录一个生日，并为下一次生日生成前7天和前1天提醒
+description: 记录、查询或删除生日，并为下一次生日生成前7天和前1天提醒
 
 method: POST
 path: /capabilities/manage_birthday
@@ -11,6 +11,15 @@ input_schema:
   type: object
   additionalProperties: false
   properties:
+    action:
+      type: string
+      enum:
+        - create
+        - list
+        - delete
+    birthday_id:
+      type: string
+      minLength: 1
     name:
       type: string
       minLength: 1
@@ -31,14 +40,57 @@ input_schema:
     notes:
       type: string
       minLength: 1
-  required:
-    - name
-    - birthday
+    status:
+      type: string
+      enum:
+        - active
+        - deleted
+    items:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          birthday_id:
+            type: string
+            minLength: 1
+          name:
+            type: string
+            minLength: 1
+          birthday:
+            type: string
+            minLength: 1
+          calendar_type:
+            type: string
+            enum:
+              - solar
+              - lunar
+          birth_year:
+            type: integer
+            minimum: 1
+            maximum: 9999
+          is_leap_month:
+            type: boolean
+          notes:
+            type: string
+            minLength: 1
+          status:
+            type: string
+            enum:
+              - active
+              - deleted
 
 output_schema:
   type: object
   additionalProperties: false
   properties:
+    action:
+      type: string
+      enum:
+        - create
+        - list
+        - delete
     birthday_id:
       type: string
     name:
@@ -64,6 +116,7 @@ output_schema:
       type: string
       enum:
         - active
+        - deleted
     next_birthday:
       type: string
     occurrence_ids:
@@ -89,16 +142,34 @@ output_schema:
           - label
           - remind_at
           - birthday_date
+    birthdays:
+      type: array
+      items:
+        type: object
+    total:
+      type: integer
+      minimum: 0
+    cancelled_occurrence_ids:
+      type: array
+      items:
+        type: string
+    batch:
+      type: boolean
+    item_count:
+      type: integer
+      minimum: 0
+    success_count:
+      type: integer
+      minimum: 0
+    failure_count:
+      type: integer
+      minimum: 0
+    results:
+      type: array
+      items:
+        type: object
     summary:
       type: string
   required:
-    - birthday_id
-    - name
-    - birthday
-    - calendar_type
-    - is_leap_month
-    - status
-    - next_birthday
-    - occurrence_ids
-    - reminder_plan
+    - action
     - summary

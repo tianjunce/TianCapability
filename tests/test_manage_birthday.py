@@ -37,6 +37,7 @@ class BirthdayServiceTests(unittest.TestCase):
             occurrences = json.loads(occurrences_path.read_text(encoding="utf-8"))
 
         self.assertEqual(result["status"], "active")
+        self.assertEqual(result["action"], "create")
         self.assertEqual(result["next_birthday"], "2099-05-12")
         self.assertEqual(len(result["occurrence_ids"]), 2)
         self.assertEqual(result["reminder_plan"][0]["stage"], "birthday_minus_7_days")
@@ -66,6 +67,7 @@ class BirthdayServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(result["next_birthday"], "2017-06-24")
+        self.assertEqual(result["action"], "create")
         self.assertEqual(result["reminder_plan"][0]["remind_at"], "2017-06-17T09:00:00")
         self.assertEqual(result["reminder_plan"][1]["remind_at"], "2017-06-23T09:00:00")
 
@@ -99,6 +101,158 @@ class BirthdayServiceTests(unittest.TestCase):
             )
 
         self.assertEqual(context.exception.code, "invalid_calendar_type")
+
+    def test_list_birthdays_returns_sorted_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.birthday_service._now",
+            return_value=datetime(2099, 4, 1, 10, 0, 0),
+        ):
+            service = BirthdayService()
+            service.create_birthday(
+                user_id="user-1",
+                name="妈妈",
+                birthday="05-12",
+                calendar_type="solar",
+            )
+            service.create_birthday(
+                user_id="user-1",
+                name="老师",
+                birthday="04-15",
+                calendar_type="solar",
+            )
+
+            result = service.list_birthdays(user_id="user-1")
+
+        self.assertEqual(result["action"], "list")
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["birthdays"][0]["name"], "老师")
+        self.assertEqual(result["birthdays"][1]["name"], "妈妈")
+
+    def test_list_birthdays_supports_filtering_by_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.birthday_service._now",
+            return_value=datetime(2099, 4, 1, 10, 0, 0),
+        ):
+            service = BirthdayService()
+            service.create_birthday(
+                user_id="user-1",
+                name="妈妈",
+                birthday="05-12",
+                calendar_type="solar",
+            )
+            service.create_birthday(
+                user_id="user-1",
+                name="爸爸",
+                birthday="06-18",
+                calendar_type="solar",
+            )
+
+            result = service.list_birthdays(user_id="user-1", name="妈妈")
+
+        self.assertEqual(result["action"], "list")
+        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["birthdays"][0]["name"], "妈妈")
+        self.assertEqual(result["summary"], "共找到 1 条名字为 妈妈 的生日记录。")
+
+    def test_delete_birthday_marks_deleted_and_hides_from_default_list(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.birthday_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 10, 0, 0),
+                datetime(2099, 4, 1, 11, 0, 0),
+            ],
+        ):
+            service = BirthdayService()
+            created = service.create_birthday(
+                user_id="user-1",
+                name="妈妈",
+                birthday="05-12",
+                calendar_type="solar",
+            )
+
+            result = service.delete_birthday(
+                user_id="user-1",
+                birthday_id=created["birthday_id"],
+            )
+            listed = service.list_birthdays(user_id="user-1")
+            deleted_only = service.list_birthdays(user_id="user-1", status="deleted")
+
+        self.assertEqual(result["action"], "delete")
+        self.assertEqual(result["status"], "deleted")
+        self.assertEqual(listed["total"], 0)
+        self.assertEqual(deleted_only["total"], 1)
+
+    def test_delete_birthday_supports_unique_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.birthday_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 10, 0, 0),
+                datetime(2099, 4, 1, 11, 0, 0),
+            ],
+        ):
+            service = BirthdayService()
+            service.create_birthday(
+                user_id="user-1",
+                name="妈妈",
+                birthday="05-12",
+                calendar_type="solar",
+            )
+
+            result = service.delete_birthday(
+                user_id="user-1",
+                name="妈妈",
+            )
+
+        self.assertEqual(result["action"], "delete")
+        self.assertEqual(result["status"], "deleted")
+        self.assertEqual(result["name"], "妈妈")
+
+    def test_delete_birthday_rejects_ambiguous_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.birthday_service._now",
+            return_value=datetime(2099, 4, 1, 10, 0, 0),
+        ):
+            service = BirthdayService()
+            service.create_birthday(
+                user_id="user-1",
+                name="妈妈",
+                birthday="05-12",
+                calendar_type="solar",
+            )
+            service.create_birthday(
+                user_id="user-1",
+                name="妈妈",
+                birthday="08-03",
+                calendar_type="lunar",
+            )
+
+            with self.assertRaises(BirthdayValidationError) as context:
+                service.delete_birthday(
+                    user_id="user-1",
+                    name="妈妈",
+                )
+
+        self.assertEqual(context.exception.code, "ambiguous_birthday")
 
 
 class ManageBirthdayHandlerTests(unittest.TestCase):
@@ -137,7 +291,189 @@ class ManageBirthdayHandlerTests(unittest.TestCase):
             birthdays_path = Path(temp_dir) / "manage_birthday" / "birthdays.json"
             birthdays = json.loads(birthdays_path.read_text(encoding="utf-8"))
 
+        self.assertEqual(payload["action"], "create")
         self.assertEqual(payload["status"], "active")
         self.assertEqual(payload["name"], "妈妈")
         self.assertEqual(len(payload["occurrence_ids"]), 2)
         self.assertEqual(len(birthdays), 1)
+
+    def test_handle_lists_birthdays(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.birthday_service._now",
+            return_value=datetime(2099, 4, 1, 10, 0, 0),
+        ):
+            BirthdayService().create_birthday(
+                user_id="user-1",
+                name="妈妈",
+                birthday="05-12",
+                calendar_type="solar",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "list",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "list")
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["birthdays"][0]["name"], "妈妈")
+
+    def test_handle_lists_birthdays_by_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.birthday_service._now",
+            return_value=datetime(2099, 4, 1, 10, 0, 0),
+        ):
+            service = BirthdayService()
+            service.create_birthday(
+                user_id="user-1",
+                name="妈妈",
+                birthday="05-12",
+                calendar_type="solar",
+            )
+            service.create_birthday(
+                user_id="user-1",
+                name="老师",
+                birthday="04-15",
+                calendar_type="solar",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "list",
+                        "name": "妈妈",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "list")
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["birthdays"][0]["name"], "妈妈")
+
+    def test_handle_deletes_birthday(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.birthday_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 10, 0, 0),
+                datetime(2099, 4, 1, 11, 0, 0),
+            ],
+        ):
+            created = BirthdayService().create_birthday(
+                user_id="user-1",
+                name="妈妈",
+                birthday="05-12",
+                calendar_type="solar",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "delete",
+                        "birthday_id": created["birthday_id"],
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "delete")
+        self.assertEqual(payload["status"], "deleted")
+
+    def test_handle_deletes_birthday_by_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.birthday_service._now",
+            side_effect=[
+                datetime(2099, 4, 1, 10, 0, 0),
+                datetime(2099, 4, 1, 11, 0, 0),
+            ],
+        ):
+            BirthdayService().create_birthday(
+                user_id="user-1",
+                name="妈妈",
+                birthday="05-12",
+                calendar_type="solar",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "delete",
+                        "name": "妈妈",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "delete")
+        self.assertEqual(payload["status"], "deleted")
+        self.assertEqual(payload["name"], "妈妈")
+
+    def test_handle_batch_creates_birthdays(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ), patch(
+            "app.services.birthday_service._now",
+            return_value=datetime(2099, 4, 1, 10, 0, 0),
+        ):
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "create",
+                        "items": [
+                            {
+                                "name": "妈妈",
+                                "birthday": "05-12",
+                                "calendar_type": "solar",
+                            },
+                            {
+                                "name": "妈妈",
+                                "birthday": "08-03",
+                                "calendar_type": "lunar",
+                            },
+                        ],
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "create")
+        self.assertTrue(payload["batch"])
+        self.assertEqual(payload["success_count"], 2)
+        self.assertEqual(payload["failure_count"], 0)

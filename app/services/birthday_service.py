@@ -161,6 +161,7 @@ class BirthdayService:
         )
 
         return {
+            "action": "create",
             "birthday_id": birthday_id,
             "name": normalized_name,
             "birthday": parsed_birthday["birthday"],
@@ -173,6 +174,111 @@ class BirthdayService:
             "occurrence_ids": occurrence_ids,
             "reminder_plan": reminder_plan,
             "summary": summary,
+        }
+
+    def list_birthdays(
+        self,
+        *,
+        user_id: str,
+        name: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_user_id = str(user_id or "").strip()
+        normalized_name = str(name or "").strip() or None
+        normalized_status = _normalize_birthday_status_filter(status)
+
+        if not normalized_user_id:
+            raise BirthdayValidationError(code="invalid_request", message="context.user_id is required")
+
+        birthdays = self.birthday_repository.list_by_user(normalized_user_id)
+        if normalized_name is not None:
+            birthdays = [item for item in birthdays if str(item.get("name") or "").strip() == normalized_name]
+        if normalized_status is not None:
+            birthdays = [item for item in birthdays if str(item.get("status") or "").strip() == normalized_status]
+        else:
+            birthdays = [item for item in birthdays if str(item.get("status") or "").strip() != "deleted"]
+
+        birthdays = sorted(
+            birthdays,
+            key=lambda item: (
+                str(item.get("next_birthday") or "9999-12-31"),
+                str(item.get("created_at") or ""),
+            ),
+        )
+
+        return {
+            "action": "list",
+            "birthdays": birthdays,
+            "total": len(birthdays),
+            "summary": _build_birthday_list_summary(
+                total=len(birthdays),
+                name=normalized_name,
+                status=normalized_status,
+            ),
+        }
+
+    def delete_birthday(
+        self,
+        *,
+        user_id: str,
+        birthday_id: str | None = None,
+        name: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_user_id = str(user_id or "").strip()
+        normalized_birthday_id = str(birthday_id or "").strip() or None
+        normalized_name = str(name or "").strip() or None
+
+        if not normalized_user_id:
+            raise BirthdayValidationError(code="invalid_request", message="context.user_id is required")
+        if normalized_birthday_id is None and normalized_name is None:
+            raise BirthdayValidationError(code="invalid_input", message="delete requires birthday_id or name")
+
+        birthday_record = _resolve_birthday_for_delete(
+            repository=self.birthday_repository,
+            user_id=normalized_user_id,
+            birthday_id=normalized_birthday_id,
+            name=normalized_name,
+        )
+        if birthday_record is None:
+            raise BirthdayValidationError(code="birthday_not_found", message="未找到要删除的生日记录")
+        if str(birthday_record.get("status") or "").strip() == "deleted":
+            raise BirthdayValidationError(code="birthday_not_deletable", message="该生日记录已经删除")
+
+        resolved_birthday_id = str(birthday_record.get("id") or "")
+
+        deleted_at = _now().isoformat(timespec="seconds")
+        updated_record = self.birthday_repository.update_fields(
+            user_id=normalized_user_id,
+            birthday_id=resolved_birthday_id,
+            fields={
+                "status": "deleted",
+                "updated_at": deleted_at,
+                "deleted_at": deleted_at,
+            },
+        )
+        if updated_record is None:
+            raise BirthdayValidationError(code="birthday_not_found", message="未找到要删除的生日记录")
+
+        cancelled_occurrences = self.occurrence_repository.update_status_by_source(
+            user_id=normalized_user_id,
+            source_type="birthday",
+            source_id=resolved_birthday_id,
+            status="cancelled",
+            updated_at=deleted_at,
+            from_statuses={"pending", "failed"},
+        )
+
+        return {
+            "action": "delete",
+            "birthday_id": resolved_birthday_id,
+            "name": str(updated_record.get("name") or ""),
+            "status": "deleted",
+            "cancelled_occurrence_ids": [
+                str(item.get("id") or "")
+                for item in cancelled_occurrences
+                if str(item.get("id") or "").strip()
+            ],
+            "summary": f"已删除生日记录：{str(updated_record.get('name') or '')}。",
         }
 
 
@@ -406,3 +512,65 @@ def _build_birthday_occurrence_content(
     if notes:
         content = f"{content} 备注：{notes}"
     return content
+
+
+def _normalize_birthday_status_filter(value: str | None) -> str | None:
+    normalized_value = str(value or "").strip().lower() or None
+    if normalized_value is None:
+        return None
+    if normalized_value in {"active", "deleted"}:
+        return normalized_value
+    raise BirthdayValidationError(code="invalid_status", message="status must be active or deleted")
+
+
+def _build_birthday_list_summary(*, total: int, name: str | None, status: str | None) -> str:
+    if total == 0:
+        if name is None and status is None:
+            return "当前没有生日记录。"
+        if name is not None and status is None:
+            return f"当前没有名字为 {name} 的生日记录。"
+        if name is None:
+            return f"当前没有状态为 {status} 的生日记录。"
+        return f"当前没有名字为 {name} 且状态为 {status} 的生日记录。"
+    if name is None and status is None:
+        return f"共找到 {total} 条生日记录。"
+    if name is not None and status is None:
+        return f"共找到 {total} 条名字为 {name} 的生日记录。"
+    if name is None:
+        return f"共找到 {total} 条状态为 {status} 的生日记录。"
+    return f"共找到 {total} 条名字为 {name} 且状态为 {status} 的生日记录。"
+
+
+def _resolve_birthday_for_delete(
+    *,
+    repository: BirthdayRepository,
+    user_id: str,
+    birthday_id: str | None,
+    name: str | None,
+) -> dict[str, Any]:
+    if birthday_id is not None:
+        birthday_record = repository.get_by_id(user_id=user_id, birthday_id=birthday_id)
+        if birthday_record is None:
+            raise BirthdayValidationError(code="birthday_not_found", message="未找到要删除的生日记录")
+        return birthday_record
+
+    matched_items = repository.find_by_name(
+        user_id=user_id,
+        name=name or "",
+        statuses={"active"},
+    )
+    if not matched_items:
+        deleted_items = repository.find_by_name(
+            user_id=user_id,
+            name=name or "",
+            statuses={"deleted"},
+        )
+        if len(deleted_items) == 1:
+            return deleted_items[0]
+        raise BirthdayValidationError(code="birthday_not_found", message="未找到要删除的生日记录")
+    if len(matched_items) > 1:
+        raise BirthdayValidationError(
+            code="ambiguous_birthday",
+            message="找到了多条同名生日记录，请提供 birthday_id",
+        )
+    return matched_items[0]

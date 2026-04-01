@@ -54,6 +54,30 @@ class ReminderOccurrenceRepository:
             if isinstance(item, dict) and str(item.get("user_id") or "") == user_id
         ]
 
+    def list_by_source(
+        self,
+        *,
+        user_id: str | None = None,
+        source_type: str | None = None,
+        source_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        items = self.store.read(default_factory=list)
+        if not isinstance(items, list):
+            return []
+
+        matched_items: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if user_id is not None and str(item.get("user_id") or "") != user_id:
+                continue
+            if source_type is not None and str(item.get("source_type") or "") != source_type:
+                continue
+            if source_id is not None and str(item.get("source_id") or "") != source_id:
+                continue
+            matched_items.append(item)
+        return matched_items
+
     def update_delivery_result(
         self,
         *,
@@ -89,6 +113,55 @@ class ReminderOccurrenceRepository:
                 next_items.append(updated_occurrence)
 
             return next_items, updated_occurrence
+
+        return self.store.update(default_factory=list, update_fn=update_fn)
+
+    def update_status_by_source(
+        self,
+        *,
+        user_id: str,
+        source_type: str,
+        source_id: str,
+        status: str,
+        updated_at: str,
+        from_statuses: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        normalized_from_statuses = {
+            str(item).strip()
+            for item in (from_statuses or set())
+            if str(item).strip()
+        }
+
+        def update_fn(items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            next_items: list[dict[str, Any]] = []
+            updated_items: list[dict[str, Any]] = []
+
+            for item in items:
+                if not isinstance(item, dict):
+                    next_items.append(item)
+                    continue
+                if str(item.get("user_id") or "") != user_id:
+                    next_items.append(item)
+                    continue
+                if str(item.get("source_type") or "") != source_type:
+                    next_items.append(item)
+                    continue
+                if str(item.get("source_id") or "") != source_id:
+                    next_items.append(item)
+                    continue
+                if normalized_from_statuses and str(item.get("status") or "") not in normalized_from_statuses:
+                    next_items.append(item)
+                    continue
+
+                updated_item = dict(item)
+                updated_item["status"] = status
+                updated_item["updated_at"] = updated_at
+                if status != "failed":
+                    updated_item.pop("last_error", None)
+                next_items.append(updated_item)
+                updated_items.append(updated_item)
+
+            return next_items, updated_items
 
         return self.store.update(default_factory=list, update_fn=update_fn)
 

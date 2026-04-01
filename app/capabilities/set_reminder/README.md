@@ -1,26 +1,24 @@
 # set_reminder
 
-`set_reminder` 用于创建一个精确到日期时间的单次提醒。
+`set_reminder` 用于管理单次提醒。
 
-当前 v1 只负责：
+当前支持 4 个动作：
 
-- 校验用户级上下文
-- 保存提醒主记录
-- 生成一条统一的 `occurrence`
-- 供独立的 `reminder_worker` 后续扫描和发送通知
+- `action=create`：创建提醒
+- `action=list`：查询当前用户的提醒记录
+- `action=update`：优先按 `reminder_id` 修改提醒；若 `content` 能唯一定位，也可直接修改
+- `action=cancel`：取消一条提醒
 
-当前 v1 还不负责：
-
-- 取消提醒
-- 修改提醒
-- 列出提醒
-- 多渠道通知编排
+同一个 `action` 也支持批量 `items`，会逐条执行并把成功和失败分别写进返回结果。
 
 ## Request
+
+创建提醒：
 
 ```json
 {
   "input": {
+    "action": "create",
     "content": "交电费",
     "remind_at": "2026-04-02 09:00",
     "note": "到点先看余额"
@@ -28,13 +26,57 @@
   "context": {
     "request_id": "task-123",
     "session_id": "session-456",
-    "user_id": "user-789",
-    "progress_context": {
-      "enabled": true,
-      "protocol": "jsonl_file",
-      "path": "/tmp/tianai-skill-progress.jsonl",
-      "scope": "skill:set_reminder"
-    }
+    "user_id": "user-789"
+  }
+}
+```
+
+查询提醒：
+
+```json
+{
+  "input": {
+    "action": "list",
+    "status": "active"
+  },
+  "context": {
+    "request_id": "task-123",
+    "session_id": "session-456",
+    "user_id": "user-789"
+  }
+}
+```
+
+修改提醒：
+
+```json
+{
+  "input": {
+    "action": "update",
+    "reminder_id": "2e3b9c6d0f4d4d5b89e3d4b4d7c9a111",
+    "remind_at": "2026-04-02 10:00",
+    "note": "改到十点"
+  },
+  "context": {
+    "request_id": "task-123",
+    "session_id": "session-456",
+    "user_id": "user-789"
+  }
+}
+```
+
+取消提醒：
+
+```json
+{
+  "input": {
+    "action": "cancel",
+    "reminder_id": "2e3b9c6d0f4d4d5b89e3d4b4d7c9a111"
+  },
+  "context": {
+    "request_id": "task-123",
+    "session_id": "session-456",
+    "user_id": "user-789"
   }
 }
 ```
@@ -46,18 +88,22 @@
 - `2026-04-02T09:00`
 - `2026-04-02 09:00:00`
 
-当前不支持：
+当前仍不直接支持未归一化时间表达，例如：
 
 - `明天下午三点`
 - `两个小时后`
-- 重复提醒规则
+
+这些表达应由上游 skill prepare 阶段先换算成具体 `remind_at`。
 
 ## Success Response
+
+创建提醒：
 
 ```json
 {
   "status": "success",
   "data": {
+    "action": "create",
     "reminder_id": "2e3b9c6d0f4d4d5b89e3d4b4d7c9a111",
     "occurrence_id": "a7b5643a72974a5a8b64ef31eaf9b222",
     "content": "交电费",
@@ -65,11 +111,67 @@
     "remind_at": "2026-04-02T09:00:00",
     "status": "active",
     "summary": "已创建提醒：2026-04-02 09:00 提醒你 交电费。备注：到点先看余额"
-  },
-  "error": null,
-  "meta": {
-    "capability": "set_reminder",
-    "duration_ms": 12
+  }
+}
+```
+
+查询提醒：
+
+```json
+{
+  "status": "success",
+  "data": {
+    "action": "list",
+    "total": 1,
+    "reminders": [
+      {
+        "id": "2e3b9c6d0f4d4d5b89e3d4b4d7c9a111",
+        "content": "交电费",
+        "remind_at": "2026-04-02T09:00:00",
+        "status": "active"
+      }
+    ],
+    "summary": "共找到 1 条提醒记录。"
+  }
+}
+```
+
+修改提醒：
+
+```json
+{
+  "status": "success",
+  "data": {
+    "action": "update",
+    "reminder_id": "2e3b9c6d0f4d4d5b89e3d4b4d7c9a111",
+    "occurrence_id": "new-occurrence-id",
+    "content": "交电费",
+    "note": "改到十点",
+    "remind_at": "2026-04-02T10:00:00",
+    "status": "active",
+    "cancelled_occurrence_ids": [
+      "old-occurrence-id"
+    ],
+    "summary": "已更新提醒：2026-04-02T10:00:00 提醒你 交电费。"
+  }
+}
+```
+
+取消提醒：
+
+```json
+{
+  "status": "success",
+  "data": {
+    "action": "cancel",
+    "reminder_id": "2e3b9c6d0f4d4d5b89e3d4b4d7c9a111",
+    "content": "交电费",
+    "remind_at": "2026-04-02T09:00:00",
+    "status": "cancelled",
+    "cancelled_occurrence_ids": [
+      "a7b5643a72974a5a8b64ef31eaf9b222"
+    ],
+    "summary": "已取消提醒：交电费，原提醒时间 2026-04-02T09:00:00。"
   }
 }
 ```
@@ -92,6 +194,12 @@ conda activate Tian3.10_clean
 python -m app.workers.reminder_worker --once
 ```
 
+常驻轮询：
+
+```bash
+python -m app.workers.reminder_worker --poll-seconds 10
+```
+
 默认会读取仓库根目录的 [`.env.local`](/Users/tianjunce/Projects/GitHub/TianCapability/.env.local)：
 
 ```bash
@@ -99,30 +207,18 @@ REMINDER_NOTIFICATION_API_URL=http://<你的-backend>/api/internal/notifications
 REMINDER_NOTIFICATION_API_TOKEN=<和 backend 一致的 token>
 ```
 
-如果你临时想覆盖，也可以直接 `export` 同名环境变量。
-
-提醒接口请求体的准确字段定义见 [README_REMINDER_NOTIFICATION_API.md](/Users/tianjunce/Projects/GitHub/TianCapability/docs/README_REMINDER_NOTIFICATION_API.md)。
-当前与 `TianAI1.5` 对齐后的顶层目标字段名是 `user_id`，值语义是用户名。
-
-当前 worker 会：
-
-- 扫描 `pending` 且已到期的 occurrence
-- 调用 `REMINDER_NOTIFICATION_API_URL`
-- 成功后把 occurrence 标记为 `delivered`
-- 失败后把 occurrence 标记为 `failed`
-
-当前还不包含重试、静默时段和多渠道分发策略。
+提醒接口字段定义见 [README_REMINDER_NOTIFICATION_API.md](/Users/tianjunce/Projects/GitHub/TianCapability/docs/README_REMINDER_NOTIFICATION_API.md)。
 
 ## Error Codes
 
 - `invalid_request`
 - `invalid_input`
+- `invalid_action`
+- `invalid_status`
 - `invalid_datetime`
 - `reminder_in_past`
+- `reminder_not_found`
+- `reminder_not_editable`
+- `ambiguous_reminder`
+- `reminder_not_cancellable`
 - `internal_error`
-
-## Detail Steps
-
-- `validate_user_scope` / `校验用户上下文`
-- `persist_reminder` / `保存提醒记录`
-- `format_reminder_result` / `整理提醒结果`

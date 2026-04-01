@@ -1,26 +1,23 @@
 # manage_birthday
 
-`manage_birthday` 用于创建一条生日记录，并生成生日提醒。
+`manage_birthday` 用于记录、查询和删除生日，并自动生成生日提醒。
 
-当前 v1 只负责：
+当前支持 3 个动作：
 
-- 创建生日主记录
-- 支持阳历和农历生日
-- 支持记录可选字段：`birth_year`、`notes`、`is_leap_month`
-- 为“下一次还来得及提醒的生日”生成 `前7天` 和 `前1天` 的 reminder occurrence
+- `action=create`：创建生日记录
+- `action=list`：查询生日记录，可选按 `name` 或 `status` 筛选
+- `action=delete`：按 `birthday_id` 删除生日记录；若 `name` 能唯一定位，也可按名字删除
 
-当前 v1 还不负责：
-
-- 查询生日列表
-- 修改生日
-- 删除生日
-- 自动续生未来多年的生日 occurrence
+同一个 `action` 也支持批量 `items`。例如同时记录同一个人的阳历和农历生日时，可以一次请求里传两条 item，capability 会逐条执行并分别返回成功或失败结果。
 
 ## Request
+
+创建生日：
 
 ```json
 {
   "input": {
+    "action": "create",
     "name": "妈妈",
     "birthday": "08-03",
     "calendar_type": "lunar",
@@ -29,13 +26,55 @@
   "context": {
     "request_id": "task-123",
     "session_id": "session-456",
-    "user_id": "user-789",
-    "progress_context": {
-      "enabled": true,
-      "protocol": "jsonl_file",
-      "path": "/tmp/tianai-skill-progress.jsonl",
-      "scope": "skill:manage_birthday"
-    }
+    "user_id": "user-789"
+  }
+}
+```
+
+查询生日：
+
+```json
+{
+  "input": {
+    "action": "list",
+    "status": "active"
+  },
+  "context": {
+    "request_id": "task-123",
+    "session_id": "session-456",
+    "user_id": "user-789"
+  }
+}
+```
+
+按名字查询生日：
+
+```json
+{
+  "input": {
+    "action": "list",
+    "name": "妈妈"
+  },
+  "context": {
+    "request_id": "task-123",
+    "session_id": "session-456",
+    "user_id": "user-789"
+  }
+}
+```
+
+删除生日：
+
+```json
+{
+  "input": {
+    "action": "delete",
+    "birthday_id": "birthday-id-1"
+  },
+  "context": {
+    "request_id": "task-123",
+    "session_id": "session-456",
+    "user_id": "user-789"
   }
 }
 ```
@@ -58,58 +97,90 @@
 
 ## Reminder Rules
 
-当前 v1 的提醒规则固定为：
+当前提醒规则固定为：
 
 - 生日前 `7天`，上午 `09:00`
 - 生日前 `1天`，上午 `09:00`
 
 如果当前这次生日已经来不及再发这两条提醒，会自动顺延到下一次还能发出提醒的生日。
-
-对于农历生日：
-
-- 会按农历原始月日换算到下一次对应的公历日期
-- 如果是闰月生日，只有存在对应闰月的年份才会生成提醒
-- 如果某个农历月没有这一天，比如三十在某年不存在，会顺延到下一次存在该农历日期的年份
+删除生日后，尚未发送的 pending occurrence 会统一取消。
 
 ## Success Response
+
+创建生日：
 
 ```json
 {
   "status": "success",
   "data": {
-    "birthday_id": "4d978f4f8a2a48d9a3dd8f3d1e1e1111",
+    "action": "create",
+    "birthday_id": "birthday-id-1",
     "name": "妈妈",
     "birthday": "08-03",
     "calendar_type": "lunar",
-    "birth_year": null,
-    "is_leap_month": false,
-    "notes": "提前准备蛋糕",
     "status": "active",
     "next_birthday": "2026-09-14",
-    "occurrence_ids": [
-      "b1",
-      "b2"
-    ],
-    "reminder_plan": [
+    "summary": "已记录生日：妈妈，按农历 08-03 提醒，下一次生日是 2026-09-14，并生成 2 条提醒。"
+  }
+}
+```
+
+查询生日：
+
+```json
+{
+  "status": "success",
+  "data": {
+    "action": "list",
+    "total": 1,
+    "birthdays": [
       {
-        "stage": "birthday_minus_7_days",
-        "label": "生日前7天提醒",
-        "remind_at": "2026-09-07T09:00:00",
-        "birthday_date": "2026-09-14"
-      },
-      {
-        "stage": "birthday_minus_1_day",
-        "label": "生日前1天提醒",
-        "remind_at": "2026-09-13T09:00:00",
-        "birthday_date": "2026-09-14"
+        "id": "birthday-id-1",
+        "name": "妈妈",
+        "next_birthday": "2026-09-14",
+        "status": "active"
       }
     ],
-    "summary": "已记录生日：妈妈，按农历 08-03 提醒，下一次生日是 2026-09-14，并生成 2 条提醒。"
-  },
-  "error": null,
-  "meta": {
-    "capability": "manage_birthday",
-    "duration_ms": 16
+    "summary": "共找到 1 条生日记录。"
+  }
+}
+```
+
+按名字查询生日：
+
+```json
+{
+  "status": "success",
+  "data": {
+    "action": "list",
+    "total": 1,
+    "birthdays": [
+      {
+        "id": "birthday-id-1",
+        "name": "妈妈",
+        "next_birthday": "2026-09-14",
+        "status": "active"
+      }
+    ],
+    "summary": "共找到 1 条名字为 妈妈 的生日记录。"
+  }
+}
+```
+
+删除生日：
+
+```json
+{
+  "status": "success",
+  "data": {
+    "action": "delete",
+    "birthday_id": "birthday-id-1",
+    "name": "妈妈",
+    "status": "deleted",
+    "cancelled_occurrence_ids": [
+      "occ-1"
+    ],
+    "summary": "已删除生日记录：妈妈。"
   }
 }
 ```
@@ -125,14 +196,12 @@
 
 - `invalid_request`
 - `invalid_input`
+- `invalid_action`
+- `invalid_status`
 - `invalid_calendar_type`
 - `invalid_birth_year`
 - `invalid_birthday`
+- `birthday_not_found`
+- `birthday_not_deletable`
 - `birthday_schedule_unavailable`
 - `internal_error`
-
-## Detail Steps
-
-- `validate_user_scope` / `校验用户上下文`
-- `persist_birthday` / `保存生日记录`
-- `format_birthday_result` / `整理生日结果`
