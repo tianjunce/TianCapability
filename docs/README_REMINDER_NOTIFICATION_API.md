@@ -228,7 +228,7 @@ AI 助手侧收到这条请求后，应负责：
 失败后：
 
 - `occurrence.status` 会记为 `failed`
-- `deliveries.json` 会写一条失败投递记录
+- reminder delivery 记录表里会写一条失败投递记录
 - `last_error` 会记录错误信息
 
 当前 v1 还没有自动重试策略。

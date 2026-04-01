@@ -23,13 +23,15 @@
     "user_id": "user-789",
     "progress_context": {
       "enabled": true,
-      "protocol": "jsonl_file",
-      "path": "/tmp/tianai-skill-progress.jsonl",
+      "protocol": "redis",
+      "key": "skill-progress:req-123",
       "scope": "skill:get_volleyball_match_list"
     }
   }
 }
 ```
+
+如果当前实例没有启用 Redis progress backend，AI runtime 会自动退回成 `protocol=jsonl_file + path=/tmp/...` 的形式。
 
 说明：
 
@@ -218,8 +220,8 @@ curl -X POST http://127.0.0.1:8012/capabilities/get_volleyball_match_list \
       "user_id": "user-789",
       "progress_context": {
         "enabled": true,
-        "protocol": "jsonl_file",
-        "path": "/tmp/tianai-skill-progress.jsonl",
+        "protocol": "redis",
+        "key": "skill-progress:task-123",
         "scope": "skill:get_volleyball_match_list"
       }
     }
@@ -233,4 +235,4 @@ curl -X POST http://127.0.0.1:8012/capabilities/get_volleyball_match_list \
 - success case：`query_type=day_stat, match_date=2026-03-29`
 - invalid_input case：`query_type=day_stat` 但缺少 `match_date`
 - business_error case：上游接口异常
-- progress case：开启 `progress_context` 并验证 JSONL 输出
+- progress case：开启 `progress_context` 并验证 progress event 输出

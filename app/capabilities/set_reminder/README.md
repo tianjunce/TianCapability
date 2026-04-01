@@ -178,10 +178,12 @@
 
 ## Storage Notes
 
-- 提醒主记录写入 `runtime-data/set_reminder/reminders.json`
-- 统一提醒 occurrence 写入 `runtime-data/reminders/occurrences.json`
-- worker 投递记录写入 `runtime-data/reminders/deliveries.json`
-- 根目录可通过环境变量 `CAPABILITY_DATA_DIR` 覆盖
+- 默认运行时主记录写入 MySQL：
+  - `capability_reminder_records`
+  - `capability_reminder_occurrence_records`
+  - `capability_reminder_delivery_records`
+- 如果显式设置 `CAPABILITY_STORAGE_BACKEND=json`，或在测试里使用 `CAPABILITY_DATA_DIR`，会退回 JSON 文件模式
+- `runtime-data/` 现在主要用于历史数据与测试，不再是默认运行时真源
 - 所有业务数据按 `context.user_id` 归属
 
 ## Worker
@@ -205,6 +207,9 @@ python -m app.workers.reminder_worker --poll-seconds 10
 ```bash
 REMINDER_NOTIFICATION_API_URL=http://<你的-backend>/api/internal/notifications/reminders
 REMINDER_NOTIFICATION_API_TOKEN=<和 backend 一致的 token>
+DB_LOGIN_USER=<mysql-user>
+DB_LOGIN_PASSWORD=<url-encoded-password>
+DB_HOST=<host:port/database>
 ```
 
 提醒接口字段定义见 [README_REMINDER_NOTIFICATION_API.md](/Users/tianjunce/Projects/GitHub/TianCapability/docs/README_REMINDER_NOTIFICATION_API.md)。

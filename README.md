@@ -10,6 +10,28 @@
 - capability-service 不负责 session / task / trace / message / UI
 - capability-service 的用户级业务数据由自身存储，按 `context.user_id` 做隔离
 
+## 当前存储现状
+
+当前 capability-service 的业务型能力默认已经切到 MySQL。
+
+- reminder：
+  - `capability_reminder_records`
+  - `capability_reminder_occurrence_records`
+  - `capability_reminder_delivery_records`
+- todo：
+  - `capability_todo_records`
+- birthday：
+  - `capability_birthday_records`
+- idea：
+  - `capability_idea_records`
+
+补充说明：
+
+- 当存在 `DB_LOGIN_USER / DB_LOGIN_PASSWORD / DB_HOST` 配置时，运行时默认走 MySQL
+- 如果显式设置 `CAPABILITY_STORAGE_BACKEND=json`，会退回 JSON 文件模式
+- 测试里常用的 `CAPABILITY_DATA_DIR` 也会让仓储走本地 JSON，便于临时目录隔离
+- `runtime-data/` 现在主要保留给历史数据和测试，不再是默认运行时真源
+
 ## 平台文档
 
 - 平台开发规范：[`docs/README_CAPABILITY_DEVELOPMENT.md`](docs/README_CAPABILITY_DEVELOPMENT.md)
@@ -43,6 +65,7 @@
 - `reminder_worker -> TianAI1.5 /api/internal/notifications/reminders`
 - 测试用户：`admin`
 - 后端已返回 `accepted`
+- capability 本地历史数据也已导入 MySQL
 
 ## Reminder Worker
 
@@ -67,6 +90,9 @@ python -m app.workers.reminder_worker --poll-seconds 10
 ```bash
 REMINDER_NOTIFICATION_API_URL=http://<你的-backend>/api/internal/notifications/reminders
 REMINDER_NOTIFICATION_API_TOKEN=<和 backend 一致的 token>
+DB_LOGIN_USER=<mysql-user>
+DB_LOGIN_PASSWORD=<url-encoded-password>
+DB_HOST=<host:port/database>
 ```
 
 ## 本地运行
@@ -110,12 +136,23 @@ curl -X POST http://127.0.0.1:8012/capabilities/get_weather \
       "user_id": "user-789",
       "progress_context": {
         "enabled": true,
-        "protocol": "jsonl_file",
-        "path": "/tmp/tianai-skill-progress.jsonl",
+        "protocol": "redis",
+        "key": "skill-progress:task-123",
         "scope": "skill:get_weather"
       }
     }
   }'
+```
+
+如果当前实例没有启用 Redis progress backend，AI runtime 会自动退回成：
+
+```json
+{
+  "enabled": true,
+  "protocol": "jsonl_file",
+  "path": "/tmp/tianai-skill-progress.jsonl",
+  "scope": "skill:get_weather"
+}
 ```
 
 ## 平台约定摘要
@@ -126,8 +163,8 @@ curl -X POST http://127.0.0.1:8012/capabilities/get_weather \
 - AI runtime 当前会稳定提供 `request_id / session_id / user_id / progress_context`
 - `HTTP 200` 表示业务成功或业务错误
 - `HTTP 400/500/504` 表示平台级错误
-- `progress_context` v1 继续使用 `jsonl_file`
-- 用户级能力应以 `context.user_id` 作为隔离键，并存储在 capability-service 自己的业务目录或数据库中
+- `progress_context` 当前优先使用 `redis`，并兼容 `jsonl_file` 回退
+- 用户级能力应以 `context.user_id` 作为隔离键，并存储在 capability-service 自己的业务表或数据库中
 - 不要依赖 AI runtime 的 `data/`、`memory/` 或其他内部目录做 capability 数据存储
 
 更完整的规范、错误码约定、manifest 规则和测试要求，都在开发规范文档里。

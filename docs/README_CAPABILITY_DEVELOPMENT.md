@@ -47,11 +47,22 @@
     "user_id": "user-789",
     "progress_context": {
       "enabled": true,
-      "protocol": "jsonl_file",
-      "path": "/abs/path/to/progress.jsonl",
+      "protocol": "redis",
+      "key": "skill-progress:task-123",
       "scope": "skill:get_weather"
     }
   }
+}
+```
+
+如果当前实例没有启用 Redis progress backend，AI runtime 会自动退回成：
+
+```json
+{
+  "enabled": true,
+  "protocol": "jsonl_file",
+  "path": "/abs/path/to/progress.jsonl",
+  "scope": "skill:get_weather"
 }
 ```
 
@@ -151,6 +162,17 @@ v1 保留：
 ```json
 {
   "enabled": true,
+  "protocol": "redis",
+  "key": "skill-progress:task-123",
+  "scope": "skill:get_weather"
+}
+```
+
+并兼容回退形式：
+
+```json
+{
+  "enabled": true,
   "protocol": "jsonl_file",
   "path": "/abs/path/to/progress.jsonl",
   "scope": "skill:get_weather"
@@ -167,9 +189,12 @@ v1 保留：
 规则：
 
 - `progress_context` 是临时写入通道，不是持久化存储
-- `protocol` 字段必须保留，不能只传 `path`
+- `protocol` 字段必须保留，不能只传 `path` 或 `key`
 - capability-service 只负责写 detail steps
 - 不支持 progress 的 capability 也必须能正常执行
+- 当前 capability-service 应至少兼容：
+  - `protocol=redis`
+  - `protocol=jsonl_file`
 
 ## 6. 用户隔离与数据存储
 
@@ -184,6 +209,8 @@ AI runtime 现在已经稳定提供 `context.user_id`。
 存储边界要求：
 
 - capability-service 自己负责业务数据存储
+- 运行时默认优先使用 capability-service 自己的 MySQL 业务表
+- `CAPABILITY_DATA_DIR` 或显式 `CAPABILITY_STORAGE_BACKEND=json` 只作为测试 / 本地文件模式回退
 - 不依赖 AI runtime 的 `data/`、`memory/` 或其他内部目录
 - 不把 capability 的持久化数据写回 AI runtime 仓库
 

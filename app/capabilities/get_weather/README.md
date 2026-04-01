@@ -49,13 +49,15 @@
     "user_id": "user-789",
     "progress_context": {
       "enabled": true,
-      "protocol": "jsonl_file",
-      "path": "/tmp/tianai-skill-progress.jsonl",
+      "protocol": "redis",
+      "key": "skill-progress:req-123",
       "scope": "skill:get_weather"
     }
   }
 }
 ```
+
+如果当前实例没有启用 Redis progress backend，AI runtime 会自动退回成 `protocol=jsonl_file + path=/tmp/...` 的形式。
 
 `get_weather` 当前是无状态 capability，不依赖用户级持久化数据，但仍应接受并透传 `request_id`、`session_id`、`user_id`、`progress_context` 这组平台上下文。
 
@@ -198,8 +200,8 @@ curl -X POST http://127.0.0.1:8012/capabilities/get_weather \
       "user_id": "user-789",
       "progress_context": {
         "enabled": true,
-        "protocol": "jsonl_file",
-        "path": "/tmp/tianai-skill-progress.jsonl",
+        "protocol": "redis",
+        "key": "skill-progress:task-123",
         "scope": "skill:get_weather"
       }
     }
@@ -220,4 +222,4 @@ curl -X POST http://127.0.0.1:8012/capabilities/get_weather \
 - date_not_supported case：`date=今晚8点`
 - date_out_of_range case：`date=下周末`
 - business_error case：`city=不存在的城市`
-- progress case：开启 `progress_context` 并验证 JSONL 输出
+- progress case：开启 `progress_context` 并验证 progress event 输出

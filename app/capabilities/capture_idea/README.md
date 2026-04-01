@@ -130,8 +130,10 @@
 
 ## Storage Notes
 
-- 灵感主记录写入 `runtime-data/capture_idea/ideas.json`
-- 根目录可通过环境变量 `CAPABILITY_DATA_DIR` 覆盖
+- 默认运行时主记录写入 MySQL：
+  - `capability_idea_records`
+- 如果显式设置 `CAPABILITY_STORAGE_BACKEND=json`，或在测试里使用 `CAPABILITY_DATA_DIR`，会退回 JSON 文件模式
+- `runtime-data/` 现在主要用于历史数据与测试，不再是默认运行时真源
 
 ## Error Codes
 
