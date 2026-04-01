@@ -44,6 +44,31 @@
 - 测试用户：`admin`
 - 后端已返回 `accepted`
 
+## Reminder Worker
+
+单次扫描：
+
+```bash
+cd /Users/tianjunce/Projects/GitHub/TianCapability
+conda activate Tian3.10_clean
+python -m app.workers.reminder_worker --once
+```
+
+常驻轮询：
+
+```bash
+cd /Users/tianjunce/Projects/GitHub/TianCapability
+conda activate Tian3.10_clean
+python -m app.workers.reminder_worker --poll-seconds 10
+```
+
+默认会读取仓库根目录 [`.env.local`](/Users/tianjunce/Projects/GitHub/TianCapability/.env.local)：
+
+```bash
+REMINDER_NOTIFICATION_API_URL=http://<你的-backend>/api/internal/notifications/reminders
+REMINDER_NOTIFICATION_API_TOKEN=<和 backend 一致的 token>
+```
+
 ## 本地运行
 
 ```bash
@@ -67,7 +92,7 @@ conda activate Tian3.10_clean
 python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-当前回归结果：`68` 个测试通过。
+当前回归结果：`86` 个测试通过。
 
 ## 调用示例
 
