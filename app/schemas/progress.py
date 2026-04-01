@@ -11,12 +11,17 @@ class ProgressContext(BaseModel):
     enabled: bool = False
     protocol: str = "jsonl_file"
     path: str | None = None
+    key: str | None = None
     scope: str | None = None
 
     @model_validator(mode="after")
     def validate_supported_protocol(self) -> "ProgressContext":
-        if self.enabled and self.protocol == "jsonl_file" and not self.path:
+        if not self.enabled:
+            return self
+        if self.protocol == "jsonl_file" and not self.path:
             raise ValueError("path is required when progress protocol is jsonl_file")
+        if self.protocol == "redis" and not self.key:
+            raise ValueError("key is required when progress protocol is redis")
         return self
 
 
