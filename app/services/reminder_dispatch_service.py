@@ -12,6 +12,7 @@ from app.services.repositories import (
     ReminderOccurrenceRepository,
     ReminderRepository,
 )
+from app.services.time_utils import beijing_now
 
 
 class ReminderDispatchError(RuntimeError):
@@ -105,7 +106,7 @@ class ReminderDispatchService:
         now: datetime | None = None,
         limit: int = 100,
     ) -> dict[str, Any]:
-        scan_started_at = (now or datetime.now()).replace(microsecond=0)
+        scan_started_at = (now or beijing_now()).replace(microsecond=0)
         due_occurrences = self.occurrence_repository.list_due(as_of=scan_started_at, limit=limit)
 
         processed = 0
@@ -115,7 +116,7 @@ class ReminderDispatchService:
 
         for occurrence in due_occurrences:
             processed += 1
-            dispatched_at = datetime.now().replace(microsecond=0).isoformat()
+            dispatched_at = beijing_now().isoformat()
             delivery_id = uuid4().hex
 
             try:

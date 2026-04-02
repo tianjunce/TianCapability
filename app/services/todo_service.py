@@ -5,6 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.services.repositories import ReminderOccurrenceRepository, TodoRepository
+from app.services.time_utils import beijing_now
 
 
 _TODO_DEADLINE_FORMATS = (
@@ -494,7 +495,7 @@ class TodoService:
 
 
 def _now() -> datetime:
-    return datetime.now().replace(microsecond=0)
+    return beijing_now()
 
 
 def _normalize_progress_percent(value: Any) -> int | None:

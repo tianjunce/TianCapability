@@ -5,6 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.services.repositories import IdeaRepository
+from app.services.time_utils import beijing_now
 
 
 class IdeaValidationError(RuntimeError):
@@ -166,7 +167,7 @@ class IdeaService:
 
 
 def _now() -> datetime:
-    return datetime.now().replace(microsecond=0)
+    return beijing_now()
 
 
 def _normalize_tags(value: Any) -> list[str]:

@@ -164,6 +164,7 @@ curl -X POST http://127.0.0.1:8012/capabilities/get_weather \
 - `HTTP 200` 表示业务成功或业务错误
 - `HTTP 400/500/504` 表示平台级错误
 - `progress_context` 当前优先使用 `redis`，并兼容 `jsonl_file` 回退
+- 业务侧所有“当前时间”统一按中国北京时区（`Asia/Shanghai`）获取；当前存储仍保持本地无 offset 的 ISO 字符串格式
 - 用户级能力应以 `context.user_id` 作为隔离键，并存储在 capability-service 自己的业务表或数据库中
 - 不要依赖 AI runtime 的 `data/`、`memory/` 或其他内部目录做 capability 数据存储
 

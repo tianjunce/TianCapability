@@ -12,6 +12,7 @@ from app.services.lunar_calendar import (
     validate_lunar_month_day,
 )
 from app.services.repositories import BirthdayRepository, ReminderOccurrenceRepository
+from app.services.time_utils import beijing_now
 
 
 _DATE_WITH_YEAR_PATTERNS = (
@@ -283,7 +284,7 @@ class BirthdayService:
 
 
 def _now() -> datetime:
-    return datetime.now().replace(microsecond=0)
+    return beijing_now()
 
 
 def _normalize_calendar_type(value: str | None) -> str:

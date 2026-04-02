@@ -95,6 +95,8 @@
 
 这些表达应由上游 skill prepare 阶段先换算成具体 `remind_at`。
 
+当前 capability 侧涉及“当前时间”的判断统一按中国北京时区（`Asia/Shanghai`）执行。
+
 ## Success Response
 
 创建提醒：
