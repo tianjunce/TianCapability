@@ -27,19 +27,21 @@ class IdeaService:
         self,
         *,
         user_id: str,
-        content: str,
+        content: str | None = None,
         title: str | None = None,
         tags: Any = None,
     ) -> dict[str, Any]:
         normalized_user_id = str(user_id or "").strip()
-        normalized_content = str(content or "").strip()
         normalized_title = str(title or "").strip() or None
+        normalized_content = str(content or "").strip() or None
         normalized_tags = _normalize_tags(tags)
 
         if not normalized_user_id:
             raise IdeaValidationError(code="invalid_request", message="context.user_id is required")
-        if not normalized_content:
-            raise IdeaValidationError(code="invalid_input", message="field 'content' is required")
+        if normalized_title is None and normalized_content is None:
+            raise IdeaValidationError(code="invalid_input", message="field 'title' or 'content' is required")
+
+        stored_content = normalized_content or normalized_title or ""
 
         created_at = _now().isoformat(timespec="seconds")
         idea_id = uuid4().hex
@@ -47,7 +49,7 @@ class IdeaService:
             "id": idea_id,
             "user_id": normalized_user_id,
             "title": normalized_title,
-            "content": normalized_content,
+            "content": stored_content,
             "tags": normalized_tags,
             "status": "active",
             "created_at": created_at,
@@ -55,14 +57,14 @@ class IdeaService:
         }
         self.idea_repository.create(idea_record)
 
-        summary_label = normalized_title or _build_excerpt(normalized_content)
+        summary_label = normalized_title or _build_excerpt(stored_content)
         summary = f"已记录灵感：{summary_label}。"
 
         return {
             "action": "create",
             "idea_id": idea_id,
             "title": normalized_title,
-            "content": normalized_content,
+            "content": stored_content,
             "tags": normalized_tags,
             "status": "active",
             "summary": summary,

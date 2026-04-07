@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -27,6 +29,13 @@ class TodoValidationError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.message = message
+
+
+@dataclass(frozen=True)
+class TodoTimeRange:
+    label: str
+    start: datetime
+    end: datetime
 
 
 class TodoService:
@@ -159,9 +168,15 @@ class TodoService:
         *,
         user_id: str,
         status: str | None = None,
+        time_range: str | None = None,
     ) -> dict[str, Any]:
         normalized_user_id = str(user_id or "").strip()
         normalized_status = _normalize_todo_status_filter(status)
+        normalized_time_range = (
+            _normalize_todo_time_range(time_range, now=_now())
+            if str(time_range or "").strip()
+            else None
+        )
 
         if not normalized_user_id:
             raise TodoValidationError(code="invalid_request", message="context.user_id is required")
@@ -171,6 +186,8 @@ class TodoService:
             todos = [item for item in todos if str(item.get("status") or "").strip() == normalized_status]
         else:
             todos = [item for item in todos if str(item.get("status") or "").strip() != "deleted"]
+        if normalized_time_range is not None:
+            todos = [item for item in todos if _todo_matches_time_range(item, normalized_time_range)]
 
         todos = sorted(todos, key=_todo_sort_key)
         open_total = sum(1 for item in todos if str(item.get("status") or "").strip() == "open")
@@ -185,6 +202,7 @@ class TodoService:
             "summary": _build_todo_list_summary(
                 total=len(todos),
                 status=normalized_status,
+                time_range=normalized_time_range.label if normalized_time_range is not None else None,
             ),
         }
 
@@ -605,9 +623,126 @@ def _normalize_todo_status_filter(value: str | None) -> str | None:
     normalized_value = str(value or "").strip().lower() or None
     if normalized_value is None:
         return None
-    if normalized_value in {"open", "completed", "deleted"}:
-        return normalized_value
+    if normalized_value in {"open", "pending", "active", "未完成", "待完成", "进行中"}:
+        return "open"
+    if normalized_value in {"completed", "已完成", "完成"}:
+        return "completed"
+    if normalized_value in {"deleted", "已删除", "删除"}:
+        return "deleted"
     raise TodoValidationError(code="invalid_status", message="status must be open, completed, or deleted")
+
+
+def _normalize_todo_time_range(value: str | None, *, now: datetime) -> TodoTimeRange | None:
+    normalized_value = str(value or "").strip()
+    if not normalized_value:
+        return None
+    if normalized_value in {"全部", "所有", "全部待办", "所有待办"}:
+        return None
+
+    now_value = now.replace(microsecond=0)
+    today_start = now_value.replace(hour=0, minute=0, second=0)
+
+    if normalized_value in {"今天", "今日"}:
+        return TodoTimeRange(
+            label=normalized_value,
+            start=today_start,
+            end=today_start + timedelta(days=1) - timedelta(seconds=1),
+        )
+    if normalized_value == "明天":
+        start = today_start + timedelta(days=1)
+        return TodoTimeRange(
+            label=normalized_value,
+            start=start,
+            end=start + timedelta(days=1) - timedelta(seconds=1),
+        )
+    if normalized_value == "后天":
+        start = today_start + timedelta(days=2)
+        return TodoTimeRange(
+            label=normalized_value,
+            start=start,
+            end=start + timedelta(days=1) - timedelta(seconds=1),
+        )
+    if normalized_value in {"最近一个星期", "最近一周", "最近7天", "未来一个星期", "未来一周", "未来7天", "这一周"}:
+        return TodoTimeRange(
+            label=normalized_value,
+            start=now_value,
+            end=now_value + timedelta(days=7),
+        )
+    if normalized_value in {"最近三天", "最近3天", "未来三天", "未来3天"}:
+        return TodoTimeRange(
+            label=normalized_value,
+            start=now_value,
+            end=now_value + timedelta(days=3),
+        )
+    if normalized_value in {"最近一天", "最近1天", "最近24小时", "未来一天", "未来1天", "未来24小时"}:
+        return TodoTimeRange(
+            label=normalized_value,
+            start=now_value,
+            end=now_value + timedelta(days=1),
+        )
+    if normalized_value in {"这周", "本周", "这个星期"}:
+        week_end = today_start + timedelta(days=(6 - today_start.weekday()), hours=23, minutes=59, seconds=59)
+        return TodoTimeRange(
+            label=normalized_value,
+            start=now_value,
+            end=week_end,
+        )
+    if normalized_value in {"下周", "下个星期", "下一个星期"}:
+        next_week_start = today_start + timedelta(days=(7 - today_start.weekday()))
+        return TodoTimeRange(
+            label=normalized_value,
+            start=next_week_start,
+            end=next_week_start + timedelta(days=7) - timedelta(seconds=1),
+        )
+
+    if matched_days := re.fullmatch(r"(最近|未来)(\d+|[一二两三四五六七八九十])天", normalized_value):
+        day_count = _parse_small_count(matched_days.group(2))
+        if day_count is not None and day_count > 0:
+            return TodoTimeRange(
+                label=normalized_value,
+                start=now_value,
+                end=now_value + timedelta(days=day_count),
+            )
+
+    if matched_weeks := re.fullmatch(r"(最近|未来)(\d+|[一二两三四])个?(?:星期|周)", normalized_value):
+        week_count = _parse_small_count(matched_weeks.group(2))
+        if week_count is not None and week_count > 0:
+            return TodoTimeRange(
+                label=normalized_value,
+                start=now_value,
+                end=now_value + timedelta(days=7 * week_count),
+            )
+
+    return None
+
+
+def _parse_small_count(value: str) -> int | None:
+    if value.isdigit():
+        return int(value)
+    return {
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+        "十": 10,
+    }.get(value)
+
+
+def _todo_matches_time_range(item: dict[str, Any], time_range: TodoTimeRange) -> bool:
+    deadline = str(item.get("deadline") or "").strip()
+    if not deadline:
+        return False
+    try:
+        deadline_value = datetime.fromisoformat(deadline)
+    except ValueError:
+        return False
+    return time_range.start <= deadline_value <= time_range.end
 
 
 def _resolve_todo_for_complete(
@@ -709,14 +844,24 @@ def _todo_sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
     return (status_order.get(status, 9), deadline or "9999-12-31T23:59:59", created_at)
 
 
-def _build_todo_list_summary(*, total: int, status: str | None) -> str:
+def _build_todo_list_summary(*, total: int, status: str | None, time_range: str | None) -> str:
+    scope = _build_todo_list_scope(status=status, time_range=time_range)
     if total == 0:
-        if status is None:
+        if not scope:
             return "当前没有待办记录。"
-        return f"当前没有状态为 {status} 的待办记录。"
-    if status is None:
+        return f"当前没有{scope}待办记录。"
+    if not scope:
         return f"共找到 {total} 条待办记录。"
-    return f"共找到 {total} 条状态为 {status} 的待办记录。"
+    return f"共找到 {total} 条{scope}待办记录。"
+
+
+def _build_todo_list_scope(*, status: str | None, time_range: str | None) -> str:
+    parts: list[str] = []
+    if time_range is not None:
+        parts.append(f"{time_range}内的")
+    if status is not None:
+        parts.append(f"状态为 {status} 的")
+    return "".join(parts)
 
 
 def _parse_existing_iso_datetime(value: str) -> datetime:

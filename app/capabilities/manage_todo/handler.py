@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from app.schemas.common import CapabilityExecutionError
@@ -24,20 +25,40 @@ _ACTION_LABELS = {
     "delete": "删除待办记录",
 }
 
+_NORMALIZED_INPUT_KEYS = {
+    "action",
+    "todo_id",
+    "title",
+    "notes",
+    "deadline",
+    "progress_percent",
+    "difficulty",
+    "status",
+    "time_range",
+    "items",
+}
+_TODO_IDENTIFIER_PATTERN = re.compile(
+    r"^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+    re.IGNORECASE,
+)
+_LATEST_TODO_ALIASES = {"latest", "latest_created"}
+
 
 async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     writer = ProgressWriter.from_context(context)
 
+    normalized_input = _normalize_input_payload(input)
     user_id = str(context.get("user_id") or "").strip()
-    action = str(input.get("action") or "create").strip().lower() or "create"
-    title = str(input.get("title") or "").strip()
-    notes = str(input.get("notes") or "").strip() or None
-    deadline = str(input.get("deadline") or "").strip() or None
-    progress_percent = input.get("progress_percent")
-    difficulty = str(input.get("difficulty") or "").strip() or None
-    todo_id = str(input.get("todo_id") or "").strip() or None
-    status = str(input.get("status") or "").strip() or None
-    raw_items = input.get("items")
+    action = _resolve_action(normalized_input)
+    title = str(normalized_input.get("title") or "").strip()
+    notes = str(normalized_input.get("notes") or "").strip() or None
+    deadline = str(normalized_input.get("deadline") or "").strip() or None
+    progress_percent = normalized_input.get("progress_percent")
+    difficulty = str(normalized_input.get("difficulty") or "").strip() or None
+    todo_id = str(normalized_input.get("todo_id") or "").strip() or None
+    status = str(normalized_input.get("status") or "").strip() or None
+    time_range = str(normalized_input.get("time_range") or "").strip() or None
+    raw_items = normalized_input.get("items")
     items = _normalize_items(raw_items)
 
     writer.running(VALIDATE_USER_STEP_ID, VALIDATE_USER_LABEL)
@@ -81,6 +102,7 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
                     "progress_percent": progress_percent,
                     "difficulty": difficulty,
                     "status": status,
+                    "time_range": time_range,
                 },
             )
     except TodoValidationError as exc:
@@ -107,6 +129,20 @@ async def _execute_single(
     difficulty = str(item.get("difficulty") or "").strip() or None
     todo_id = str(item.get("todo_id") or "").strip() or None
     status = str(item.get("status") or "").strip() or None
+    time_range = str(item.get("time_range") or "").strip() or None
+
+    if action in {"update", "complete", "delete"} and todo_id:
+        normalized_todo_id = todo_id.strip().lower()
+        if normalized_todo_id in _LATEST_TODO_ALIASES:
+            todo_id = _resolve_latest_todo_identifier(
+                service=service,
+                action=action,
+                user_id=user_id,
+                title=title or None,
+            )
+        elif not title and not _looks_like_todo_identifier(todo_id):
+            title = todo_id
+            todo_id = None
 
     if action == "create":
         return await asyncio.to_thread(
@@ -123,6 +159,7 @@ async def _execute_single(
             service.list_todos,
             user_id=user_id,
             status=status,
+            time_range=time_range,
         )
     if action == "update":
         return await asyncio.to_thread(
@@ -161,3 +198,65 @@ def _normalize_items(value: Any) -> list[dict[str, Any]] | None:
             raise CapabilityExecutionError(code="invalid_input", message="each item in 'items' must be an object")
         normalized_items.append(item)
     return normalized_items
+
+
+def _normalize_input_payload(value: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(value)
+    for source in (value.get("slots"), value.get("context")):
+        if not isinstance(source, dict):
+            continue
+        for key in _NORMALIZED_INPUT_KEYS:
+            if _has_value(normalized.get(key)):
+                continue
+            if _has_value(source.get(key)):
+                normalized[key] = source.get(key)
+    return normalized
+
+
+def _resolve_action(input: dict[str, Any]) -> str:
+    action = str(input.get("action") or "").strip().lower()
+    if action:
+        return action
+    if _has_value(input.get("status")) or _has_value(input.get("time_range")):
+        return "list"
+
+    for key in ("todo_id", "title", "notes", "deadline", "progress_percent", "difficulty", "items"):
+        if _has_value(input.get(key)):
+            return "create"
+    return "list"
+
+
+def _has_value(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def _looks_like_todo_identifier(value: Any) -> bool:
+    normalized = str(value or "").strip()
+    return bool(normalized and _TODO_IDENTIFIER_PATTERN.fullmatch(normalized))
+
+
+def _resolve_latest_todo_identifier(
+    *,
+    service: TodoService,
+    action: str,
+    user_id: str,
+    title: str | None,
+) -> str | None:
+    allowed_statuses = {"open"} if action in {"update", "complete"} else {"open", "completed", "deleted"}
+    normalized_title = str(title or "").strip() or None
+    candidates = [
+        item
+        for item in service.todo_repository.list_by_user(user_id)
+        if str(item.get("status") or "").strip() in allowed_statuses
+        and (normalized_title is None or str(item.get("title") or "").strip() == normalized_title)
+    ]
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda item: (
+            str(item.get("created_at") or ""),
+            str(item.get("id") or ""),
+        )
+    )
+    return str(candidates[-1].get("id") or "").strip() or None

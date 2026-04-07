@@ -19,7 +19,6 @@
   "input": {
     "action": "create",
     "title": "家长作业提醒工具",
-    "content": "做一个给家长用的作业提醒工具，重点是晚间统一提醒和周报汇总。",
     "tags": ["产品", "教育"]
   },
   "context": {
@@ -64,8 +63,9 @@
 
 ## Input Notes
 
-- `content` 是创建时必填
-- `title` 可选
+- 创建时 `title` 和 `content` 至少提供一个，推荐直接提供 `title`
+- 如果只提供了 `title`，服务端会把同样的文字作为底层 `content` 存储，避免额外补字段
+- `content` 可选，适合补充更长的想法说明
 - `tags` 可选，建议上游归一化成字符串数组
 - `list` 动作支持可选 `tag` 过滤
 
@@ -80,7 +80,7 @@
     "action": "create",
     "idea_id": "idea-id-1",
     "title": "家长作业提醒工具",
-    "content": "做一个给家长用的作业提醒工具，重点是晚间统一提醒和周报汇总。",
+    "content": "家长作业提醒工具",
     "tags": [
       "产品",
       "教育"

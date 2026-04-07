@@ -40,7 +40,8 @@
 {
   "input": {
     "action": "list",
-    "status": "open"
+    "status": "open",
+    "time_range": "最近一个星期"
   },
   "context": {
     "request_id": "task-123",
@@ -108,6 +109,19 @@
 - `2026-04-08`
 
 日期格式不带时间时，会默认按当天 `23:59` 处理。
+
+## Supported Time Range Expressions
+
+- `今天` / `今日`
+- `明天` / `后天`
+- `最近一天` / `最近24小时`
+- `最近三天` / `最近3天`
+- `最近一个星期` / `最近一周` / `最近7天`
+- `本周` / `这周` / `这个星期`
+- `下周` / `下个星期`
+
+`time_range` 查询会按待办的 `deadline` 做过滤；没有 `deadline` 的待办不会落入时间范围结果。
+如果传入了当前不支持的 `time_range` 表达，capability 会忽略这个条件，直接返回全部待办。
 
 ## Reminder Plan
 
