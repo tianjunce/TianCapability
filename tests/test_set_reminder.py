@@ -148,6 +148,41 @@ class ReminderServiceTests(unittest.TestCase):
         self.assertEqual(reminders[0]["status"], "cancelled")
         self.assertEqual(occurrences[0]["status"], "cancelled")
 
+    def test_cancel_reminder_supports_content_and_human_readable_remind_at(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            service = ReminderService()
+            service.create_reminder(
+                user_id="user-1",
+                content="取快递",
+                remind_at="2099-04-10 06:00",
+            )
+            service.create_reminder(
+                user_id="user-1",
+                content="取快递",
+                remind_at="2099-04-10 07:00",
+            )
+
+            result = service.cancel_reminder(
+                user_id="user-1",
+                content="取快递",
+                remind_at="2099-04-10 06:00",
+            )
+            reminders = service.list_reminders(user_id="user-1")
+
+        self.assertEqual(result["action"], "cancel")
+        self.assertEqual(result["status"], "cancelled")
+        self.assertEqual(result["remind_at"], "2099-04-10T06:00:00")
+        cancelled = [item for item in reminders["reminders"] if item["status"] == "cancelled"]
+        active = [item for item in reminders["reminders"] if item["status"] == "active"]
+        self.assertEqual(len(cancelled), 1)
+        self.assertEqual(cancelled[0]["remind_at"], "2099-04-10T06:00:00")
+        self.assertEqual(len(active), 1)
+        self.assertEqual(active[0]["remind_at"], "2099-04-10T07:00:00")
+
     def test_update_reminder_rebuilds_pending_occurrence(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
             os.environ,
@@ -330,6 +365,42 @@ class SetReminderHandlerTests(unittest.TestCase):
 
         self.assertEqual(payload["action"], "cancel")
         self.assertEqual(payload["status"], "cancelled")
+
+    def test_handle_cancels_reminder_by_content_and_remind_at(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir, patch.dict(
+            os.environ,
+            {"CAPABILITY_DATA_DIR": temp_dir},
+            clear=False,
+        ):
+            service = ReminderService()
+            service.create_reminder(
+                user_id="user-1",
+                content="取快递",
+                remind_at="2099-04-10 06:00",
+            )
+            service.create_reminder(
+                user_id="user-1",
+                content="取快递",
+                remind_at="2099-04-10 07:00",
+            )
+
+            payload = asyncio.run(
+                handle(
+                    {
+                        "action": "cancel",
+                        "content": "取快递",
+                        "remind_at": "2099-04-10 06:00",
+                    },
+                    {
+                        "request_id": "task-1",
+                        "user_id": "user-1",
+                    },
+                )
+            )
+
+        self.assertEqual(payload["action"], "cancel")
+        self.assertEqual(payload["status"], "cancelled")
+        self.assertEqual(payload["remind_at"], "2099-04-10T06:00:00")
 
     def test_handle_updates_reminder(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir, patch.dict(

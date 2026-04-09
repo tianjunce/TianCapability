@@ -276,6 +276,11 @@ class ReminderService:
         normalized_reminder_id = str(reminder_id or "").strip() or None
         normalized_content = str(content or "").strip() or None
         normalized_remind_at = str(remind_at or "").strip() or None
+        normalized_remind_at_iso = (
+            _parse_remind_at(normalized_remind_at).isoformat(timespec="seconds")
+            if normalized_remind_at is not None
+            else None
+        )
 
         if not normalized_user_id:
             raise ReminderValidationError(code="invalid_request", message="context.user_id is required")
@@ -290,7 +295,7 @@ class ReminderService:
             user_id=normalized_user_id,
             reminder_id=normalized_reminder_id,
             content=normalized_content,
-            remind_at=normalized_remind_at,
+            remind_at=normalized_remind_at_iso,
         )
         reminder_status = str(reminder_record.get("status") or "").strip()
         if reminder_status not in {"active", "failed"}:
