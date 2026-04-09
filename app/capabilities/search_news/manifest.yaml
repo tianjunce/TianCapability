@@ -1,0 +1,87 @@
+name: search_news
+kind: tool
+description: 根据问题类别路由到指定新闻站点抓取并返回结构化摘要
+
+method: POST
+path: /capabilities/search_news
+timeout_seconds: 30
+supports_progress: true
+
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    query:
+      type: string
+      minLength: 1
+    category:
+      type: string
+      enum:
+        - news
+        - tech
+        - entertainment
+        - other
+    top_k:
+      type: integer
+      minimum: 1
+      maximum: 10
+  required:
+    - query
+    - category
+
+output_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    query:
+      type: string
+    category:
+      type: string
+    site:
+      type: string
+    result:
+      type: string
+    results:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          title:
+            type: string
+          url:
+            type: string
+          source:
+            type: string
+          publish_time:
+            type: string
+          summary:
+            type: string
+          content:
+            type: string
+        required:
+          - title
+          - url
+          - source
+          - publish_time
+          - summary
+          - content
+    fallback_used:
+      type: boolean
+    error:
+      anyOf:
+        - type: string
+        - type: "null"
+    debug:
+      anyOf:
+        - type: object
+        - type: "null"
+  required:
+    - query
+    - category
+    - site
+    - result
+    - results
+    - fallback_used
+    - error
+    - debug
