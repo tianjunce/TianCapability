@@ -181,6 +181,36 @@ class CmaWeatherParsingTests(unittest.TestCase):
         self.assertEqual(payload["matched_date"], "2026-03-30 ~ 2026-04-05")
         self.assertEqual(len(payload["forecast_days"]), 7)
 
+    def test_build_weather_response_supports_next_week_weekday(self) -> None:
+        daily_forecasts = [
+            ForecastDay(
+                forecast_date=LocalDate(2026, 4, 11) + timedelta(days=offset),
+                weekday_text=f"星期{offset}",
+                display_date=(LocalDate(2026, 4, 11) + timedelta(days=offset)).strftime("%m/%d"),
+                weather_day="多云",
+                temp_high_day=str(20 + offset),
+                temp_low_night=str(10 + offset),
+            )
+            for offset in range(7)
+        ]
+        bundle = ForecastBundle(
+            city_code="58457",
+            source="cma",
+            publish_date=LocalDate(2026, 4, 11),
+            daily_forecasts=daily_forecasts,
+        )
+
+        payload = build_weather_response(
+            city_name="杭州",
+            requested_date="下周二",
+            forecast_bundle=bundle,
+        )
+
+        self.assertEqual(payload["date"], "下周二")
+        self.assertEqual(payload["matched_date"], "2026-04-14")
+        self.assertEqual(len(payload["forecast_days"]), 1)
+        self.assertEqual(payload["forecast_days"][0]["date"], "2026-04-14")
+
     def test_build_weather_response_rejects_date_out_of_range(self) -> None:
         bundle = _parse_cma_forecast_html(html=_build_cma_html(), city_code="58457")
 

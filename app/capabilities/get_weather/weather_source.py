@@ -375,11 +375,10 @@ def _parse_weekend_dates(request_text: str, publish_date: LocalDate) -> list[Loc
 
 
 def _parse_weekday_date(request_text: str, publish_date: LocalDate) -> LocalDate | None:
-    match = re.fullmatch(r"(本周|这周|下周)?(?:星期|周|礼拜)([一二三四五六日天])", request_text)
-    if not match:
+    prefix, weekday_token = _match_weekday_request_text(request_text)
+    if weekday_token is None:
         return None
 
-    prefix, weekday_token = match.groups()
     weekday = WEEKDAY_TOKEN_MAP[weekday_token]
     start_of_week = publish_date - timedelta(days=publish_date.weekday())
 
@@ -389,6 +388,33 @@ def _parse_weekday_date(request_text: str, publish_date: LocalDate) -> LocalDate
         return start_of_week + timedelta(days=7 + weekday)
 
     return publish_date + timedelta(days=(weekday - publish_date.weekday()) % 7)
+
+
+def _match_weekday_request_text(request_text: str) -> tuple[str | None, str | None]:
+    compact_match = re.fullmatch(
+        r"(本周|这周|下周|下个周|本星期|这星期|下星期|下个星期|本礼拜|这礼拜|下礼拜|下个礼拜)([一二三四五六日天])",
+        request_text,
+    )
+    if compact_match:
+        raw_prefix, weekday_token = compact_match.groups()
+        return _normalize_weekday_prefix(raw_prefix), weekday_token
+
+    match = re.fullmatch(r"(本周|这周|下周)?(?:星期|周|礼拜)([一二三四五六日天])", request_text)
+    if not match:
+        return None, None
+
+    raw_prefix, weekday_token = match.groups()
+    return _normalize_weekday_prefix(raw_prefix), weekday_token
+
+
+def _normalize_weekday_prefix(prefix: str | None) -> str | None:
+    if prefix in {"本周", "本星期", "本礼拜"}:
+        return "本周"
+    if prefix in {"这周", "这星期", "这礼拜"}:
+        return "这周"
+    if prefix in {"下周", "下个周", "下星期", "下个星期", "下礼拜", "下个礼拜"}:
+        return "下周"
+    return prefix
 
 
 def _build_date_out_of_range_message(available_dates: list[LocalDate]) -> str:
