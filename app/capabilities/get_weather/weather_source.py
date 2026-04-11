@@ -1117,7 +1117,8 @@ def _build_city_weather_cache_keys(city_name: str) -> list[str]:
 
 
 def _load_cached_forecast_bundle(cache_key: str) -> ForecastBundle | None:
-    today = LocalDate.today().isoformat()
+    scope_date = _current_weather_cache_scope_date()
+    today = scope_date.isoformat()
     with _WEATHER_FORECAST_CACHE_LOCK:
         cache_data = _read_weather_cache_file()
         cache_data, changed = _prune_weather_cache_data(cache_data, scope_date=today)
@@ -1135,7 +1136,7 @@ def _load_cached_forecast_bundle(cache_key: str) -> ForecastBundle | None:
             cache_data.pop(cache_key, None)
             _write_weather_cache_file(cache_data)
             return None
-        if not _should_cache_forecast_bundle(bundle):
+        if not _should_cache_forecast_bundle(bundle, scope_date=scope_date):
             cache_data.pop(cache_key, None)
             _write_weather_cache_file(cache_data)
             return None
@@ -1147,11 +1148,12 @@ def _save_cached_forecast_bundle(cache_key: str, bundle: ForecastBundle) -> None
 
 
 def _save_cached_forecast_bundle_for_keys(cache_keys: list[str], bundle: ForecastBundle) -> None:
-    if not _should_cache_forecast_bundle(bundle):
+    scope_date = _current_weather_cache_scope_date()
+    if not _should_cache_forecast_bundle(bundle, scope_date=scope_date):
         return
     with _WEATHER_FORECAST_CACHE_LOCK:
         cache_data = _read_weather_cache_file()
-        today = LocalDate.today().isoformat()
+        today = scope_date.isoformat()
         cache_data, _ = _prune_weather_cache_data(cache_data, scope_date=today)
         bundle_data = _serialize_forecast_bundle(bundle)
         for cache_key in cache_keys:
@@ -1200,8 +1202,19 @@ def _prune_weather_cache_data(
     return pruned_cache, changed
 
 
-def _should_cache_forecast_bundle(bundle: ForecastBundle) -> bool:
-    return bundle.source == "cma" and len(bundle.daily_forecasts) >= 7
+def _should_cache_forecast_bundle(
+    bundle: ForecastBundle, *, scope_date: LocalDate | None = None
+) -> bool:
+    effective_scope_date = scope_date or _current_weather_cache_scope_date()
+    return (
+        bundle.source == "cma"
+        and len(bundle.daily_forecasts) >= 7
+        and bundle.publish_date == effective_scope_date
+    )
+
+
+def _current_weather_cache_scope_date() -> LocalDate:
+    return LocalDate.today()
 
 
 def _write_weather_cache_file(cache_data: dict[str, Any]) -> None:

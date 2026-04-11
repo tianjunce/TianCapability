@@ -433,6 +433,9 @@ class WeatherSourceFallbackTests(unittest.TestCase):
             ), patch(
                 "app.capabilities.get_weather.weather_source.WEATHER_CACHE_DIR",
                 cache_path.parent,
+            ), patch(
+                "app.capabilities.get_weather.weather_source._current_weather_cache_scope_date",
+                return_value=LocalDate(2026, 3, 30),
             ):
                 _save_cached_forecast_bundle("https://weather.cma.cn/web/weather/58457.html", cached_bundle)
                 with patch(
@@ -460,6 +463,9 @@ class WeatherSourceFallbackTests(unittest.TestCase):
             ), patch(
                 "app.capabilities.get_weather.weather_source.WEATHER_CACHE_DIR",
                 cache_path.parent,
+            ), patch(
+                "app.capabilities.get_weather.weather_source._current_weather_cache_scope_date",
+                return_value=LocalDate(2026, 3, 30),
             ), patch(
                 "app.capabilities.get_weather.weather_source._fetch_cma_forecast_by_url",
                 return_value=cached_bundle,
@@ -528,6 +534,68 @@ class WeatherSourceFallbackTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(rewritten_cache, {})
 
+    def test_load_cached_forecast_bundle_prunes_previous_day_publish_after_midnight(self) -> None:
+        stale_publish_bundle = ForecastBundle(
+            city_code="58457",
+            source="cma",
+            publish_date=LocalDate(2026, 4, 10),
+            daily_forecasts=[
+                ForecastDay(
+                    forecast_date=LocalDate(2026, 4, 10) + timedelta(days=offset),
+                    weekday_text=f"星期{offset}",
+                    display_date=(LocalDate(2026, 4, 10) + timedelta(days=offset)).strftime("%m/%d"),
+                    weather_day="多云",
+                    temp_current="20" if offset == 0 else None,
+                    temp_high_day=str(25 + offset),
+                    temp_low_night=str(15 + offset),
+                )
+                for offset in range(7)
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = Path(temp_dir) / "forecast-cache.json"
+            cache_data = {
+                "https://weather.cma.cn/web/weather/58457.html": {
+                    "fetched_on": "2026-04-11",
+                    "bundle": {
+                        "city_code": stale_publish_bundle.city_code,
+                        "source": stale_publish_bundle.source,
+                        "publish_date": stale_publish_bundle.publish_date.isoformat(),
+                        "daily_forecasts": [
+                            {
+                                "forecast_date": item.forecast_date.isoformat(),
+                                "weekday_text": item.weekday_text,
+                                "display_date": item.display_date,
+                                "weather_day": item.weather_day,
+                                "temp_high_day": item.temp_high_day,
+                                "temp_low_night": item.temp_low_night,
+                                "weather_night": item.weather_night,
+                                "temp_current": item.temp_current,
+                            }
+                            for item in stale_publish_bundle.daily_forecasts
+                        ],
+                    },
+                }
+            }
+            cache_path.write_text(json.dumps(cache_data, ensure_ascii=False), encoding="utf-8")
+
+            with patch(
+                "app.capabilities.get_weather.weather_source.WEATHER_FORECAST_CACHE_PATH",
+                cache_path,
+            ), patch(
+                "app.capabilities.get_weather.weather_source.WEATHER_CACHE_DIR",
+                cache_path.parent,
+            ), patch(
+                "app.capabilities.get_weather.weather_source._current_weather_cache_scope_date",
+                return_value=LocalDate(2026, 4, 11),
+            ):
+                result = _load_cached_forecast_bundle("https://weather.cma.cn/web/weather/58457.html")
+                rewritten_cache = json.loads(cache_path.read_text(encoding="utf-8"))
+
+        self.assertIsNone(result)
+        self.assertEqual(rewritten_cache, {})
+
     def test_load_cached_forecast_bundle_prunes_legacy_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             cache_path = Path(temp_dir) / "forecast-cache.json"
@@ -579,6 +647,9 @@ class WeatherSourceFallbackTests(unittest.TestCase):
             ), patch(
                 "app.capabilities.get_weather.weather_source.WEATHER_CACHE_DIR",
                 cache_path.parent,
+            ), patch(
+                "app.capabilities.get_weather.weather_source._current_weather_cache_scope_date",
+                return_value=LocalDate(2026, 3, 30),
             ):
                 _save_cached_forecast_bundle("city:杭州", cached_bundle)
                 with patch(
@@ -590,6 +661,44 @@ class WeatherSourceFallbackTests(unittest.TestCase):
         self.assertEqual(payload["city_code"], "58457")
         self.assertEqual(payload["matched_date"], "2026-04-04 ~ 2026-04-05")
         self.assertEqual(payload["source"], "cma")
+
+    def test_save_cached_forecast_bundle_skips_previous_day_publish_after_midnight(self) -> None:
+        stale_publish_bundle = ForecastBundle(
+            city_code="58457",
+            source="cma",
+            publish_date=LocalDate(2026, 4, 10),
+            daily_forecasts=[
+                ForecastDay(
+                    forecast_date=LocalDate(2026, 4, 10) + timedelta(days=offset),
+                    weekday_text=f"星期{offset}",
+                    display_date=(LocalDate(2026, 4, 10) + timedelta(days=offset)).strftime("%m/%d"),
+                    weather_day="多云",
+                    temp_current="20" if offset == 0 else None,
+                    temp_high_day=str(25 + offset),
+                    temp_low_night=str(15 + offset),
+                )
+                for offset in range(7)
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_path = Path(temp_dir) / "forecast-cache.json"
+            with patch(
+                "app.capabilities.get_weather.weather_source.WEATHER_FORECAST_CACHE_PATH",
+                cache_path,
+            ), patch(
+                "app.capabilities.get_weather.weather_source.WEATHER_CACHE_DIR",
+                cache_path.parent,
+            ), patch(
+                "app.capabilities.get_weather.weather_source._current_weather_cache_scope_date",
+                return_value=LocalDate(2026, 4, 11),
+            ):
+                _save_cached_forecast_bundle(
+                    "https://weather.cma.cn/web/weather/58457.html",
+                    stale_publish_bundle,
+                )
+
+        self.assertFalse(cache_path.exists())
 
     def test_resolve_city_reports_fetch_error_when_cma_index_unavailable(self) -> None:
         with patch(
