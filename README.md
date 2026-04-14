@@ -38,6 +38,14 @@
 - skill 开发规范：[`docs/README_SKILL_DEVELOPMENT.md`](docs/README_SKILL_DEVELOPMENT.md)
 - 示例 capability：[`app/capabilities/get_weather/README.md`](app/capabilities/get_weather/README.md)
 
+新增或修改 capability 时，默认要同步检查对应 `SKILL.md` 顶部元数据是否齐全：
+
+- `name`
+- `description`
+- 可选但推荐的 `minimal_inputs`
+
+其中 `minimal_inputs` 用于 AI runtime 首轮披露“启动这个 skill 至少要抓住什么”，应写成紧凑签名，不要重复 `description`。
+
 ## 当前能力
 
 - `get_weather`

@@ -46,7 +46,7 @@ TianAI1.5/backend/app/skills/<skill_name>/SKILL.md
 
 职责：
 
-- 顶部 `name` / `description` 给系统首轮路由提供语义依据
+- 顶部 `name` / `description` / `minimal_inputs` 给系统首轮路由提供语义依据
 - 正文给 prepare 阶段提供参数抽取与归一化规则
 - 帮助开发者把“路由提示”和“组参规则”分开写清楚
 
@@ -69,7 +69,7 @@ TianAI1.5/backend/app/skills/<skill_name>/skill.json
 推荐按下面顺序开发：
 
 1. 先定 capability 契约：`input`、`output`、错误码、超时
-2. 再写 `SKILL.md`：顶部 `description` 怎么让系统选中它，正文怎么让 prepare 阶段准备参数
+2. 再写 `SKILL.md`：顶部 `description + minimal_inputs` 怎么让系统选中并稳定启动它，正文怎么让 prepare 阶段准备参数
 3. 最后写 `skill.json`：把 prepare 阶段的参数映射到 capability 输入，把 capability 输出映射回 skill 结果
 
 不要反过来写。
@@ -160,13 +160,42 @@ prepare 阶段在这种模式下要做的事是：
 ```md
 name: get_weather
 description: 查询指定地点当前或未来 7 天内的天气，支持直接解析今天、明天、后天、周末、下周一、具体日期等日期表达，不需要上层先换算成具体年月日。
+minimal_inputs: location; date?
 ```
 
 原因：
 
-- 运行时扫描 catalog 时，只会先读顶部 `name` 和 `description`
+- 运行时扫描 catalog 时，只会先读顶部 `name` / `description` / `minimal_inputs`
 - 如果这里缺失，skill 可能不会进入 catalog
 - 如果这里写得太弱，系统初始路由阶段可能根本不会选中这个 skill
+
+### 3.1.1 `minimal_inputs` 推荐写成紧凑签名
+
+`minimal_inputs` 的目标不是重复描述 skill 用途，而是补一句：
+
+- 首轮稳定启动这个 skill，最少要确认什么
+
+推荐写法：
+
+```md
+minimal_inputs: location; date?
+minimal_inputs: query; category:auto|other; top_k?
+minimal_inputs: action; create:title; list:default; update/delete:title|last_target
+```
+
+约束：
+
+- 尽量短，优先写字段或分支签名
+- 不要和 `description` 重复
+- 不要改写成长句说明
+- 多动作 skill 优先写成 `action; create:...; list:...; update:...`
+
+补充事实：
+
+- AI runtime 当前会把整份 `SKILL.md` 正文放进执行期 prepare prompt
+- 所以正文 token 会被真实消耗，不是只给开发者看的注释
+- 正文应聚焦抽槽、归一化、缺失信息、执行边界
+- 不建议保留纯路由段落，例如 `目的`、`适用场景`、`适用示例`、`不适用场景`、`对应 skill_name`、`当前 v1 执行入口`
 
 ### 3.2 `description` 不是摘要，而是“首轮路由提示”
 
@@ -196,7 +225,7 @@ description: 查询指定地点当前或未来 7 天内的天气，支持直接�
 
 系统当前的实际读取方式是：
 
-- 交流脑只看顶部 `name` / `description`
+- 交流脑首轮只看顶部 `name` / `description` / `minimal_inputs`
 - 执行脑在已经决定调用 skill 后，才看正文准备参数
 
 这意味着：

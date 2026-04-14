@@ -356,12 +356,14 @@ output_schema:
 - 本地运行方式
 - `curl` 调用示例
 - 最小测试用例说明
+- 如果该 capability 对应 TianAI skill，补一行建议的 `minimal_inputs` 签名
 
 要求：
 
 - 示例优先，不要只写抽象字段名
 - 错误码必须文档化
 - progress 是增强项，要写清是否支持
+- `minimal_inputs` 应写成紧凑签名，不要重复 capability 用途摘要
 
 ## 11. 测试规范
 

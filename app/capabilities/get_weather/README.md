@@ -2,6 +2,12 @@
 
 `get_weather` 是 capability-service 的示例 capability。
 
+对应 TianAI `SKILL.md` 头部推荐：
+
+```md
+minimal_inputs: location; date?
+```
+
 它负责：
 
 - 根据城市名解析天气城市编码
