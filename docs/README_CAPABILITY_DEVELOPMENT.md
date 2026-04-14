@@ -45,6 +45,8 @@
     "request_id": "task-123",
     "session_id": "session-456",
     "user_id": "user-789",
+    "attempt_index": 1,
+    "max_attempts": 2,
     "progress_context": {
       "enabled": true,
       "protocol": "redis",
@@ -71,7 +73,7 @@
 - `input` 是 capability 自己的业务输入
 - `context` 是平台级上下文
 - `request_id` 必填
-- AI runtime 当前会稳定传入 `request_id`、`session_id`、`user_id`、`progress_context`
+- AI runtime 当前会稳定传入 `request_id`、`session_id`、`user_id`、`attempt_index`、`max_attempts`、`progress_context`
 - `session_id` 应视为运行时基线字段
 - `user_id` 应视为运行时基线字段
 - `progress_context` 是可选增强能力
@@ -80,6 +82,9 @@
 
 - capability 可以忽略自己不需要的上下文字段
 - 但如果 capability 有用户级业务数据，就应使用 `context.user_id` 做数据隔离
+- 同一个 `request_id` 在 runtime 快速重试时可能重复到达
+- `attempt_index` 表示当前是第几次尝试，`max_attempts` 表示本次最多会尝试几次
+- capability 不应假设同一个 `request_id` 只会出现一次
 
 ## 3. 统一响应协议
 
@@ -126,6 +131,7 @@
 - `need_input` 不出现在 capability-service 协议里
 - `error.code` 必须稳定且文档化
 - 不接受只抛异常然后依赖 message 猜错误类型
+- 只读查询类 capability 应按幂等方式实现，以兼容 runtime 的快速重试
 
 ## 4. HTTP 语义
 
@@ -333,6 +339,9 @@ output_schema:
 - endpoint 路径固定为 `/capabilities/{name}`
 - `input_schema` / `output_schema` 必须与实现保持一致
 - manifest 是 capability 的平台契约，不是仅供文档展示
+- `timeout_seconds` 是当前稳定的单一超时上限，不等于未来一定只会有这一种 timeout 维度
+- 不要为了兼容少数慢链路，把所有交互型 capability 的 `timeout_seconds` 一起抬得很大
+- 长链路能力更适合配合 `supports_progress=true` 与更清晰的上层重试策略
 
 ## 10. 开发者 README 规范
 
