@@ -766,7 +766,7 @@ def _build_summary(
     if isinstance(suggest_values, list):
         rendered_suggest = [_stringify_suggest(value) for value in suggest_values[:3]]
         if any(item != "-" for item in rendered_suggest):
-            lines.append(f"农事建议（肥/药/灌）：{rendered_suggest[0]} / {rendered_suggest[1]} / {rendered_suggest[2]}。")
+            lines.append(f"农事建议（施肥/ 病害/ 虫害）：{rendered_suggest[0]} / {rendered_suggest[1]} / {rendered_suggest[2]}。")
 
     if warnings:
         lines.append("部分数据未获取：" + "；".join(warnings[:3]) + "。")
