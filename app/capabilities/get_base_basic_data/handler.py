@@ -275,7 +275,7 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         "suggest_overview": suggest_overview,
         "warnings": warnings,
     }
-    print(f"{DEBUG_PREFIX} final_result={json.dumps(result, ensure_ascii=False, default=str)}")
+    # print(f"{DEBUG_PREFIX} final_result={json.dumps(result, ensure_ascii=False, default=str)}")
     return result
 
 
