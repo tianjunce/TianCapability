@@ -53,6 +53,8 @@
 - `manage_todo`
 - `manage_birthday`
 - `capture_idea`
+- `get_user_bases`（capability: `get_user_bases`）
+- `get_base_basic_data`（capability: `get_base_basic_data`）
 
 其中当前业务型 skill 的 v1 状态是：
 
@@ -60,6 +62,14 @@
 - `manage_todo`：创建、查询、修改、完成、删除待办，支持同 action 的批量 `items`
 - `manage_birthday`：创建、查询、删除阳历/农历生日记录，支持同 action 的批量 `items`
 - `capture_idea`：记录、查询、删除灵感正文、可选标题和标签，支持同 action 的批量 `items`
+- `get_user_bases`（`/capabilities/get_user_bases`）：按当前 `context.user_id` 查询可访问基地列表，返回基地数组、数量和是否多基地。
+- `get_base_basic_data`（`/capabilities/get_base_basic_data`）：在已确定基地后查询基地数据（温湿度、虫情、生育期、最新概览）；若多基地且目标不明确，会返回可选基地列表用于继续确认。
+
+这两个基地相关 skill 的 token 生成规则（仅适用于这两个 skill）是：
+
+- username 使用 `context.user_id`
+- `user_id=admin` 时 `level=0`，其他用户 `level=5`
+- token 过期时间为 48 小时（HS256）
 
 ## 当前 worker
 

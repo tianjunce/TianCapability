@@ -1,0 +1,66 @@
+﻿name: get_base_basic_data
+kind: tool
+description: 按当前登录用户可见基地查询核心信息（温湿度、虫情、生育期、最新概览）
+
+method: POST
+path: /capabilities/get_base_basic_data
+timeout_seconds: 30
+supports_progress: true
+
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    action:
+      type: string
+      enum:
+        - overview
+    area_id:
+      type: string
+      minLength: 1
+    area_name:
+      type: string
+      minLength: 1
+    start_date:
+      type: string
+      minLength: 1
+    end_date:
+      type: string
+      minLength: 1
+  required:
+    - action
+
+output_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    summary:
+      type: string
+    selected_area_id:
+      type: string
+    selected_area_name:
+      type: string
+    date_range_start:
+      type: string
+    date_range_end:
+      type: string
+    device_refs:
+      type: object
+      additionalProperties: true
+    met_overview:
+      type: object
+      additionalProperties: true
+    insect_overview:
+      type: object
+      additionalProperties: true
+    rice_stage_overview:
+      type: object
+      additionalProperties: true
+    latest_snapshot:
+      type: object
+      additionalProperties: true
+    warnings:
+      type: array
+      items:
+        type: string
+

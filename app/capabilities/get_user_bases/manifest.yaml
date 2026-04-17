@@ -1,0 +1,61 @@
+name: get_user_bases
+kind: tool
+description: 查询当前登录用户可访问的基地列表
+
+method: POST
+path: /capabilities/get_user_bases
+timeout_seconds: 20
+supports_progress: true
+
+input_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    action:
+      type: string
+      enum:
+        - list
+    area_name:
+      type: string
+      minLength: 1
+  required:
+    - action
+
+output_schema:
+  type: object
+  additionalProperties: false
+  properties:
+    summary:
+      type: string
+    area_count:
+      type: integer
+      minimum: 0
+    has_multiple_areas:
+      type: boolean
+    areas:
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        properties:
+          area_id:
+            type: string
+          area_name:
+            type: string
+          met_num:
+            type: string
+          insects_num:
+            type: string
+          ricestage_num:
+            type: string
+        required:
+          - area_id
+          - area_name
+          - met_num
+          - insects_num
+          - ricestage_num
+  required:
+    - summary
+    - area_count
+    - has_multiple_areas
+    - areas
