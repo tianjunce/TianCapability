@@ -222,10 +222,11 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         end_date=end_date,
         warnings=warnings,
     )
+    suggest_start_date = _offset_date(end_date, days=-14)
     suggest_data = _fetch_optional(
         client=client,
-        path="/screen/getSuggestRice",
-        params={"deviceNum": suggest_num, "startTime": start_date, "endTime": end_date},
+        path="/screen/v2/getSuggestRice",
+        params={"deviceNum": suggest_num, "startTime": suggest_start_date, "endTime": end_date},
         empty_condition=not suggest_num,
         label="农事建议",
         warnings=warnings,
@@ -298,6 +299,10 @@ def _parse_date(value: str) -> date:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError as exc:
         raise CapabilityExecutionError(code="invalid_input", message=f"日期格式不合法：{value}，应为 YYYY-MM-DD") from exc
+
+
+def _offset_date(value: str, *, days: int) -> str:
+    return (_parse_date(value) + timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 def _unwrap_api_payload(payload: Any, *, path: str) -> Any:
@@ -612,16 +617,24 @@ def _extract_latest_suggestion(value: Any) -> Any:
 
 
 def _remove_none_like_frontend(value: list[Any]) -> list[Any]:
-    # 对齐 ScreenView.vue 的 removeNone 逻辑
+    # 对齐 ScreenView.vue 的 removeNone 语义，并补充空白字符串过滤
     result: list[Any] = []
     for item in value:
         if isinstance(item, list):
-            if any(sub_item is not None for sub_item in item):
+            if any(_has_suggest_value(sub_item) for sub_item in item):
                 result.append(item)
             continue
-        if item:
+        if _has_suggest_value(item):
             result.append(item)
     return result
+
+
+def _has_suggest_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return bool(value)
 
 
 def _compact_time_axes(
