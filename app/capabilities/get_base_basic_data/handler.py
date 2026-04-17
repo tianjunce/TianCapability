@@ -5,7 +5,6 @@ from datetime import date, datetime, timedelta
 import hashlib
 import hmac
 import json
-from statistics import mean
 from typing import Any
 from urllib.parse import urljoin
 
@@ -197,6 +196,7 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
     met_num = str(selected_area.get("met_num") or "").strip()
     insects_num = str(selected_area.get("insects_num") or "").strip()
     ricestage_num = str(selected_area.get("ricestage_num") or "").strip()
+    suggest_num = str(selected_area.get("suggest_num") or "").strip()
     # print(f"{DEBUG_PREFIX} device_refs met_num={met_num!r} insects_num={insects_num!r} ricestage_num={ricestage_num!r}")
 
     met_data = _fetch_optional(
@@ -215,19 +215,19 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         label="虫情",
         warnings=warnings,
     )
-    latest_data = _fetch_optional(
-        client=client,
-        path="/screen/getLatestData",
-        params={"areaId": area_id_value},
-        empty_condition=not area_id_value,
-        label="最新系统数据",
-        warnings=warnings,
-    )
     rice_stage_data, stage_meta = _fetch_rice_stage(
         client=client,
         ricestage_num=ricestage_num,
         start_date=start_date,
         end_date=end_date,
+        warnings=warnings,
+    )
+    suggest_data = _fetch_optional(
+        client=client,
+        path="/screen/getSuggestRice",
+        params={"deviceNum": suggest_num, "startTime": start_date, "endTime": end_date},
+        empty_condition=not suggest_num,
+        label="农事建议",
         warnings=warnings,
     )
 
@@ -237,7 +237,12 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
     met_overview = _build_met_overview(met_data)
     insect_overview = _build_insect_overview(insect_data)
     rice_stage_overview = _build_rice_stage_overview(rice_stage_data, stage_meta=stage_meta)
-    latest_snapshot = latest_data if isinstance(latest_data, dict) else {}
+    suggest_overview = _build_suggest_overview(suggest_data)
+    time_axes, met_overview, insect_overview, rice_stage_overview = _compact_time_axes(
+        met_overview=met_overview,
+        insect_overview=insect_overview,
+        rice_stage_overview=rice_stage_overview,
+    )
 
     summary = _build_summary(
         area_name=area_name_value,
@@ -245,13 +250,13 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         end_date=end_date,
         met_overview=met_overview,
         insect_overview=insect_overview,
-        latest_snapshot=latest_snapshot,
+        suggest_overview=suggest_overview,
         warnings=warnings,
     )
     writer.success(FORMAT_RESULT_STEP_ID, FORMAT_RESULT_LABEL)
-    # print(f"{DEBUG_PREFIX} result warnings={len(warnings)} met_series={len(met_overview.get('temp_series') or [])} insect_series={len(insect_overview.get('ehm_series') or [])}")
+    # print(f"{DEBUG_PREFIX} result warnings={len(warnings)}")
 
-    return {
+    result = {
         "summary": summary,
         "selected_area_id": area_id_value,
         "selected_area_name": area_name_value,
@@ -261,18 +266,23 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
             "met_num": met_num,
             "insects_num": insects_num,
             "ricestage_num": ricestage_num,
+            "suggest_num": suggest_num,
         },
+        "time_axes": time_axes,
         "met_overview": met_overview,
         "insect_overview": insect_overview,
         "rice_stage_overview": rice_stage_overview,
-        "latest_snapshot": latest_snapshot,
+        "suggest_overview": suggest_overview,
         "warnings": warnings,
     }
+    print(f"{DEBUG_PREFIX} final_result={json.dumps(result, ensure_ascii=False, default=str)}")
+    return result
 
 
 def _resolve_date_range(*, start_date: str, end_date: str) -> tuple[str, str]:
     today = date.today()
-    default_start = today - timedelta(days=365)
+    # 默认最近 20 天（含今天）
+    default_start = today - timedelta(days=20)
 
     resolved_start = _parse_date(start_date) if start_date else default_start
     resolved_end = _parse_date(end_date) if end_date else today
@@ -513,11 +523,10 @@ def _fetch_rice_stage(
 
     params = {
         "deviceNum": ricestage_num,
+        "preset": preset,
         "startTime": start_date,
         "endTime": end_date,
     }
-    if preset:
-        params["preset"] = preset
 
     payload = _fetch_optional(
         client=client,
@@ -531,71 +540,161 @@ def _fetch_rice_stage(
 
 
 def _build_met_overview(data: Any) -> dict[str, Any]:
+    # 按 ScreenView.vue 保持原始字段口径，不在 capability 内做统计聚合
     if not isinstance(data, dict):
-        return {}
-    xticks = data.get("xticks") if isinstance(data.get("xticks"), list) else []
+        return {"xticks": [], "temp": [], "hum": []}
     return {
-        "latest_date": xticks[-1] if xticks else None,
-        "temp_series": _summarize_series_group(data.get("temp"), xticks=xticks),
-        "hum_series": _summarize_series_group(data.get("hum"), xticks=xticks),
+        "xticks": _as_list(data.get("xticks")),
+        "temp": _as_list(data.get("temp")),
+        "hum": _as_list(data.get("hum")),
     }
 
 
 def _build_insect_overview(data: Any) -> dict[str, Any]:
+    # 按 ScreenView.vue 保持原始字段口径，不在 capability 内做统计聚合
     if not isinstance(data, dict):
-        return {}
-    xticks = data.get("xticks") if isinstance(data.get("xticks"), list) else []
+        return {"xticks": [], "ehm": [], "dzjym": [], "hefs": []}
     return {
-        "latest_date": xticks[-1] if xticks else None,
-        "ehm_series": _summarize_series_group(data.get("ehm"), xticks=xticks),
-        "dzjym_series": _summarize_series_group(data.get("dzjym"), xticks=xticks),
-        "hefs_series": _summarize_series_group(data.get("hefs"), xticks=xticks),
+        "xticks": _as_list(data.get("xticks")),
+        "ehm": _as_list(data.get("ehm")),
+        "dzjym": _as_list(data.get("dzjym")),
+        "hefs": _as_list(data.get("hefs")),
     }
 
 
 def _build_rice_stage_overview(data: Any, *, stage_meta: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(data, dict):
-        return stage_meta if stage_meta else {}
+    xticks: list[Any] = []
+    stage: list[Any] = []
+    if isinstance(data, dict):
+        xticks = _as_list(data.get("xticks"))
+        stage = _as_list(data.get("stage"))
 
-    xticks = data.get("xticks") if isinstance(data.get("xticks"), list) else []
-    stage_series = _summarize_series_group(data.get("stage"), xticks=xticks)
-    payload = {
-        "latest_date": xticks[-1] if xticks else None,
-        "stage_series": stage_series,
+    return {
+        "xticks": xticks,
+        "stage": stage,
+        "source": str(stage_meta.get("source") or ""),
+        "preset": str(stage_meta.get("preset") or ""),
+        "crop": str(stage_meta.get("crop") or ""),
     }
-    payload.update({key: value for key, value in stage_meta.items() if value})
-    return payload
 
 
-def _summarize_series_group(value: Any, *, xticks: list[Any]) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
+def _as_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
-    result: list[dict[str, Any]] = []
-    latest_date = str(xticks[-1]) if xticks else ""
-    for item in value:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("name") or "").strip() or "series"
-        data_points = item.get("data")
-        if not isinstance(data_points, list):
-            continue
-        numbers = [_to_float(point) for point in data_points]
-        valid = [point for point in numbers if point is not None]
-        if not valid:
-            continue
-        summary = {
-            "name": name,
-            "latest": _round_number(valid[-1]),
-            "min": _round_number(min(valid)),
-            "max": _round_number(max(valid)),
-            "mean": _round_number(mean(valid)),
-            "count": len(valid),
+
+def _build_suggest_overview(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {
+            "sugF_latest": None,
+            "sugD_latest": None,
+            "sugI_latest": None,
+            "sug_data": [None, None, None],
         }
-        if latest_date:
-            summary["latest_date"] = latest_date
-        result.append(summary)
+
+    sug_f_latest = _extract_latest_suggestion(data.get("sugF"))
+    sug_d_latest = _extract_latest_suggestion(data.get("sugD"))
+    sug_i_latest = _extract_latest_suggestion(data.get("sugI"))
+    return {
+        "sugF_latest": sug_f_latest,
+        "sugD_latest": sug_d_latest,
+        "sugI_latest": sug_i_latest,
+        "sug_data": [sug_f_latest, sug_d_latest, sug_i_latest],
+    }
+
+
+def _extract_latest_suggestion(value: Any) -> Any:
+    if not isinstance(value, list):
+        return None
+    filtered = _remove_none_like_frontend(value)
+    if not filtered:
+        return None
+    return filtered[-1]
+
+
+def _remove_none_like_frontend(value: list[Any]) -> list[Any]:
+    # 对齐 ScreenView.vue 的 removeNone 逻辑
+    result: list[Any] = []
+    for item in value:
+        if isinstance(item, list):
+            if any(sub_item is not None for sub_item in item):
+                result.append(item)
+            continue
+        if item:
+            result.append(item)
     return result
+
+
+def _compact_time_axes(
+    *,
+    met_overview: dict[str, Any],
+    insect_overview: dict[str, Any],
+    rice_stage_overview: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    axis_registry: dict[str, str] = {}
+    time_axes: dict[str, Any] = {}
+
+    def _register_axis(xticks: list[Any]) -> str:
+        compact = _compact_daily_xticks(xticks)
+        key = json.dumps(compact, ensure_ascii=False, sort_keys=True)
+        axis_ref = axis_registry.get(key)
+        if axis_ref:
+            return axis_ref
+        axis_ref = f"axis_{len(axis_registry) + 1}"
+        axis_registry[key] = axis_ref
+        time_axes[axis_ref] = compact
+        return axis_ref
+
+    def _bind_axis_ref(payload: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(payload)
+        xticks = _as_list(merged.pop("xticks", []))
+        merged["axis_ref"] = _register_axis(xticks)
+        return merged
+
+    return (
+        time_axes,
+        _bind_axis_ref(met_overview),
+        _bind_axis_ref(insect_overview),
+        _bind_axis_ref(rice_stage_overview),
+    )
+
+
+def _compact_daily_xticks(xticks: list[Any]) -> dict[str, Any]:
+    values = [str(item).strip() for item in xticks if str(item).strip()]
+    if not values:
+        return {"type": "daily", "start": "", "end": "", "count": 0}
+
+    parsed_dates: list[date] = []
+    for item in values:
+        try:
+            parsed_dates.append(datetime.strptime(item, "%Y-%m-%d").date())
+        except ValueError:
+            return {"type": "list", "values": values, "count": len(values)}
+
+    if any(parsed_dates[index] > parsed_dates[index + 1] for index in range(len(parsed_dates) - 1)):
+        return {"type": "list", "values": values, "count": len(values)}
+
+    start = parsed_dates[0]
+    end = parsed_dates[-1]
+    day_count = (end - start).days + 1
+    full_dates = [(start + timedelta(days=offset)).strftime("%Y-%m-%d") for offset in range(day_count)]
+    present = set(values)
+    missing = [item for item in full_dates if item not in present]
+
+    if len(missing) > len(values):
+        return {"type": "list", "values": values, "count": len(values)}
+
+    compact: dict[str, Any] = {
+        "type": "daily",
+        "start": start.strftime("%Y-%m-%d"),
+        "end": end.strftime("%Y-%m-%d"),
+        "count": len(values),
+    }
+    if missing:
+        compact["missing"] = missing
+    duplicate_count = len(values) - len(present)
+    if duplicate_count > 0:
+        compact["duplicates"] = duplicate_count
+    return compact
 
 
 def _build_summary(
@@ -605,35 +704,56 @@ def _build_summary(
     end_date: str,
     met_overview: dict[str, Any],
     insect_overview: dict[str, Any],
-    latest_snapshot: dict[str, Any],
+    suggest_overview: dict[str, Any],
     warnings: list[str],
 ) -> str:
     lines = [f"基地“{area_name}”数据已获取（{start_date} ~ {end_date}）。"]
 
-    temp_mean = _extract_nested_number(latest_snapshot, ("temp", "mean"))
-    hum_mean = _extract_nested_number(latest_snapshot, ("hum", "mean"))
-    if temp_mean is not None or hum_mean is not None:
-        facts: list[str] = []
-        if temp_mean is not None:
-            facts.append(f"最新平均温度 {temp_mean}°C")
-        if hum_mean is not None:
-            facts.append(f"最新平均湿度 {hum_mean}%")
-        lines.append("；".join(facts) + "。")
+    temp_max = _extract_named_series_last(met_overview.get("temp"), ("最高",))
+    temp_mean = _extract_named_series_last(met_overview.get("temp"), ("平均",))
+    temp_min = _extract_named_series_last(met_overview.get("temp"), ("最低",))
+    hum_max = _extract_named_series_last(met_overview.get("hum"), ("最高",))
+    hum_mean = _extract_named_series_last(met_overview.get("hum"), ("平均",))
+    hum_min = _extract_named_series_last(met_overview.get("hum"), ("最低",))
 
-    latest_ehm = _extract_first_latest(insect_overview.get("ehm_series"))
-    latest_dzjym = _extract_first_latest(insect_overview.get("dzjym_series"))
+    temp_facts: list[str] = []
+    if temp_max is not None:
+        temp_facts.append(f"最高 {temp_max}°C")
+    if temp_mean is not None:
+        temp_facts.append(f"平均 {temp_mean}°C")
+    if temp_min is not None:
+        temp_facts.append(f"最低 {temp_min}°C")
+    if temp_facts:
+        lines.append("温度：" + "，".join(temp_facts) + "。")
+
+    hum_facts: list[str] = []
+    if hum_max is not None:
+        hum_facts.append(f"最高 {hum_max}%")
+    if hum_mean is not None:
+        hum_facts.append(f"平均 {hum_mean}%")
+    if hum_min is not None:
+        hum_facts.append(f"最低 {hum_min}%")
+    if hum_facts:
+        lines.append("湿度：" + "，".join(hum_facts) + "。")
+
+    latest_ehm = _extract_named_series_last(insect_overview.get("ehm"), ("二化螟",))
+    latest_dzjym = _extract_named_series_last(insect_overview.get("dzjym"), ("稻纵卷叶螟",))
+    latest_hefs = _extract_named_series_last(insect_overview.get("hefs"), ("褐飞虱",))
     insect_facts: list[str] = []
     if latest_ehm is not None:
-        insect_facts.append(f"二化螟最新值 {latest_ehm}")
+        insect_facts.append(f"二化螟 {latest_ehm}")
     if latest_dzjym is not None:
-        insect_facts.append(f"稻纵卷叶螟最新值 {latest_dzjym}")
+        insect_facts.append(f"稻纵卷叶螟 {latest_dzjym}")
+    if latest_hefs is not None:
+        insect_facts.append(f"褐飞虱 {latest_hefs}")
     if insect_facts:
-        lines.append("；".join(insect_facts) + "。")
+        lines.append("虫情：" + "，".join(insect_facts) + "。")
 
-    temp_series_count = len(met_overview.get("temp_series") or [])
-    hum_series_count = len(met_overview.get("hum_series") or [])
-    if temp_series_count or hum_series_count:
-        lines.append(f"温湿度序列：温度 {temp_series_count} 条，湿度 {hum_series_count} 条。")
+    suggest_values = suggest_overview.get("sug_data")
+    if isinstance(suggest_values, list):
+        rendered_suggest = [_stringify_suggest(value) for value in suggest_values[:3]]
+        if any(item != "-" for item in rendered_suggest):
+            lines.append(f"农事建议（肥/药/灌）：{rendered_suggest[0]} / {rendered_suggest[1]} / {rendered_suggest[2]}。")
 
     if warnings:
         lines.append("部分数据未获取：" + "；".join(warnings[:3]) + "。")
@@ -641,28 +761,39 @@ def _build_summary(
     return " ".join(lines)
 
 
-def _extract_first_latest(series_list: Any) -> float | int | None:
-    if not isinstance(series_list, list) or not series_list:
+def _extract_named_series_last(series_group: Any, name_keywords: tuple[str, ...]) -> float | int | None:
+    if not isinstance(series_group, list):
         return None
-    first = series_list[0]
-    if not isinstance(first, dict):
-        return None
-    value = first.get("latest")
-    if isinstance(value, (int, float)):
-        return _round_number(value)
+
+    normalized_keywords = tuple(keyword.replace(" ", "").strip() for keyword in name_keywords if keyword)
+    for item in series_group:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").replace(" ", "").strip()
+        if normalized_keywords and not any(keyword in name for keyword in normalized_keywords):
+            continue
+        return _extract_last_number(item.get("data"))
     return None
 
 
-def _extract_nested_number(source: dict[str, Any], path: tuple[str, ...]) -> float | int | None:
-    current: Any = source
-    for key in path:
-        if not isinstance(current, dict):
-            return None
-        current = current.get(key)
-    number = _to_float(current)
-    if number is None:
+def _extract_last_number(data: Any) -> float | int | None:
+    if not isinstance(data, list):
         return None
-    return _round_number(number)
+    for item in reversed(data):
+        number = _to_float(item)
+        if number is not None:
+            return _round_number(number)
+    return None
+
+
+def _stringify_suggest(value: Any) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return "、".join(parts) if parts else "-"
+    text = str(value).strip()
+    return text or "-"
 
 
 def _to_float(value: Any) -> float | None:

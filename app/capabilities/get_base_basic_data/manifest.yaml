@@ -1,6 +1,6 @@
 ﻿name: get_base_basic_data
 kind: tool
-description: 按当前登录用户可见基地查询核心信息（温湿度、虫情、生育期、最新概览）
+description: 按当前登录用户可见基地查询核心信息（温湿度、虫情、生育期、农事建议）
 
 method: POST
 path: /capabilities/get_base_basic_data
@@ -47,6 +47,9 @@ output_schema:
     device_refs:
       type: object
       additionalProperties: true
+    time_axes:
+      type: object
+      additionalProperties: true
     met_overview:
       type: object
       additionalProperties: true
@@ -56,7 +59,7 @@ output_schema:
     rice_stage_overview:
       type: object
       additionalProperties: true
-    latest_snapshot:
+    suggest_overview:
       type: object
       additionalProperties: true
     warnings:

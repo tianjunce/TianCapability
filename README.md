@@ -63,7 +63,10 @@
 - `manage_birthday`：创建、查询、删除阳历/农历生日记录，支持同 action 的批量 `items`
 - `capture_idea`：记录、查询、删除灵感正文、可选标题和标签，支持同 action 的批量 `items`
 - `get_user_bases`（`/capabilities/get_user_bases`）：按当前 `context.user_id` 查询可访问基地列表，返回基地数组、数量和是否多基地。
-- `get_base_basic_data`（`/capabilities/get_base_basic_data`）：在已确定基地后查询基地数据（温湿度、虫情、生育期、最新概览）；若多基地且目标不明确，会返回可选基地列表用于继续确认。
+- `get_base_basic_data`（`/capabilities/get_base_basic_data`）：在已确定基地后查询基地数据（温湿度、虫情、生育期、农事建议）；若多基地且目标不明确，会返回可选基地列表用于继续确认。
+  - 未传时间范围时默认最近 20 天（含当天）
+  - 返回采用紧凑时间轴：顶层 `time_axes` + 各数据块 `axis_ref`，用于减少传输与 LLM 解析 token
+  - 不再返回 `latest_snapshot`，最新口径由趋势序列末值与农事建议汇总给出
 
 这两个基地相关 skill 的 token 生成规则（仅适用于这两个 skill）是：
 
