@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import importlib.util
 import inspect
 import logging
@@ -78,12 +79,24 @@ class CapabilityRegistryLoader:
             try:
                 request = CapabilityExecuteRequest.model_validate(body)
             except PydanticValidationError as exc:
+                message = self._format_pydantic_error(exc)
+                debug_body = self._format_debug_payload(body)
+                print(
+                    f"[capability-debug] request validation failed capability={definition.manifest.name} "
+                    f"error={message} body={debug_body}"
+                )
+                LOGGER.warning(
+                    "Capability request validation failed capability=%s error=%s body=%s",
+                    definition.manifest.name,
+                    message,
+                    debug_body,
+                )
                 return self._error_response(
                     http_status=status.HTTP_400_BAD_REQUEST,
                     capability=definition.manifest.name,
                     duration_ms=self._duration_ms(started_at),
                     code="invalid_request",
-                    message=self._format_pydantic_error(exc),
+                    message=message,
                 )
 
             try:
@@ -92,12 +105,24 @@ class CapabilityRegistryLoader:
                     payload=request.input,
                 )
             except JsonSchemaValidationError as exc:
+                message = self._format_jsonschema_error(exc)
+                debug_input = self._format_debug_payload(request.input)
+                print(
+                    f"[capability-debug] input schema validation failed capability={definition.manifest.name} "
+                    f"error={message} input={debug_input}"
+                )
+                LOGGER.warning(
+                    "Capability input schema validation failed capability=%s error=%s input=%s",
+                    definition.manifest.name,
+                    message,
+                    debug_input,
+                )
                 return self._error_response(
                     http_status=status.HTTP_400_BAD_REQUEST,
                     capability=definition.manifest.name,
                     duration_ms=self._duration_ms(started_at),
                     code="invalid_input",
-                    message=self._format_jsonschema_error(exc),
+                    message=message,
                 )
 
             try:
@@ -137,6 +162,18 @@ class CapabilityRegistryLoader:
                     message=self._format_jsonschema_error(exc),
                 )
             except CapabilityExecutionError as exc:
+                debug_input = self._format_debug_payload(request.input)
+                print(
+                    f"[capability-debug] execution error capability={definition.manifest.name} "
+                    f"code={exc.code} message={exc.message} input={debug_input}"
+                )
+                LOGGER.warning(
+                    "Capability execution error capability=%s code=%s message=%s input=%s",
+                    definition.manifest.name,
+                    exc.code,
+                    exc.message,
+                    debug_input,
+                )
                 return self._error_response(
                     http_status=self._http_status_for_error_code(exc.code),
                     capability=definition.manifest.name,
@@ -239,6 +276,15 @@ class CapabilityRegistryLoader:
 
     def _duration_ms(self, started_at: float) -> int:
         return int((time.perf_counter() - started_at) * 1000)
+
+    def _format_debug_payload(self, payload: Any, *, limit: int = 2000) -> str:
+        try:
+            rendered = json.dumps(payload, ensure_ascii=False, default=str)
+        except Exception:
+            rendered = repr(payload)
+        if len(rendered) > limit:
+            return f"{rendered[:limit]}...(truncated)"
+        return rendered
 
     def _format_jsonschema_error(self, exc: JsonSchemaValidationError) -> str:
         location = ".".join(str(part) for part in exc.absolute_path)

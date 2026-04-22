@@ -135,7 +135,12 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         start_date=str(input.get("start_date") or "").strip(),
         end_date=str(input.get("end_date") or "").strip(),
     )
-    # print(f"{DEBUG_PREFIX} input action={action} area_id={area_id!r} area_name={area_name!r} start={start_date} end={end_date} user_id={_user_id}")
+    raw_area_id = input.get("area_id")
+    print(
+        f"{DEBUG_PREFIX} incoming action={action!r} area_id_raw={raw_area_id!r} "
+        f"area_id_type={type(raw_area_id).__name__} area_name={area_name!r} "
+        f"start_date_raw={input.get('start_date')!r} end_date_raw={input.get('end_date')!r}"
+    )
     writer.success(VALIDATE_AUTH_STEP_ID, VALIDATE_AUTH_LABEL)
 
     client = RiceApiClient(
