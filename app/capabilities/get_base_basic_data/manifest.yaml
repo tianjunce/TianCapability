@@ -36,8 +36,6 @@ output_schema:
   type: object
   additionalProperties: false
   properties:
-    summary:
-      type: string
     selected_area_id:
       type: string
     selected_area_name:

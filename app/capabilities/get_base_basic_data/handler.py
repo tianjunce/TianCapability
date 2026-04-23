@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 import hashlib
 import hmac
 import json
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
@@ -30,6 +31,9 @@ SPECIAL_SCREEN_RICESTAGE_IDS = {"11", "330727001"}
 SECRET_KEY = "jlsdjfWeer12341"
 ALGORITHM = "HS256"
 DEBUG_PREFIX = "[capability:get_base_basic_data]"
+RESULT_LOG_DIR_NAME = "log"
+RESULT_LOG_FILE_NAME = "get_base_basic_data_result.log"
+API_CALL_LOG_FILE_NAME = "get_base_basic_data_api_calls.log"
 
 
 def _base64url_encode(raw: bytes) -> str:
@@ -101,16 +105,81 @@ class RiceApiClient:
                 timeout=self.timeout_seconds,
             )
         except requests.RequestException as exc:
+            _append_api_call_log(
+                record={
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "label": request_label,
+                    "path": path,
+                    "url": url,
+                    "method": "GET",
+                    "params": request_params,
+                    "ok": False,
+                    "status_code": None,
+                    "error_type": exc.__class__.__name__,
+                    "error": str(exc),
+                    "response": None,
+                }
+            )
             print(f"{DEBUG_PREFIX} request_error label={request_label} error={exc.__class__.__name__}: {str(exc)}")
             raise
 
         # print(f"{DEBUG_PREFIX} response label={request_label} status={response.status_code} ok={response.ok}")
-        response.raise_for_status()
         try:
-            return response.json()
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            _append_api_call_log(
+                record={
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "label": request_label,
+                    "path": path,
+                    "url": url,
+                    "method": "GET",
+                    "params": request_params,
+                    "ok": False,
+                    "status_code": response.status_code,
+                    "error_type": exc.__class__.__name__,
+                    "error": str(exc),
+                    "response": _raw_text_preview(response.text),
+                }
+            )
+            raise
+        try:
+            payload = response.json()
         except ValueError as exc:
+            _append_api_call_log(
+                record={
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "label": request_label,
+                    "path": path,
+                    "url": url,
+                    "method": "GET",
+                    "params": request_params,
+                    "ok": False,
+                    "status_code": response.status_code,
+                    "error_type": exc.__class__.__name__,
+                    "error": "response is not valid json",
+                    "response": _raw_text_preview(response.text),
+                }
+            )
             print(f"{DEBUG_PREFIX} json_error label={request_label} path={path}")
             raise CapabilityExecutionError(code="upstream_invalid_json", message=f"接口返回非 JSON：{path}") from exc
+
+        _append_api_call_log(
+            record={
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "label": request_label,
+                "path": path,
+                "url": url,
+                "method": "GET",
+                "params": request_params,
+                "ok": True,
+                "status_code": response.status_code,
+                "error_type": "",
+                "error": "",
+                "response": payload,
+            }
+        )
+        return payload
 
 
 
@@ -227,7 +296,7 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         end_date=end_date,
         warnings=warnings,
     )
-    suggest_start_date = _offset_date(end_date, days=-14)
+    suggest_start_date = _offset_date(start_date, days=-14)
     suggest_data = _fetch_optional(
         client=client,
         path="/screen/v2/getSuggestRice",
@@ -250,20 +319,10 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         rice_stage_overview=rice_stage_overview,
     )
 
-    summary = _build_summary(
-        area_name=area_name_value,
-        start_date=start_date,
-        end_date=end_date,
-        met_overview=met_overview,
-        insect_overview=insect_overview,
-        suggest_overview=suggest_overview,
-        warnings=warnings,
-    )
     writer.success(FORMAT_RESULT_STEP_ID, FORMAT_RESULT_LABEL)
     # print(f"{DEBUG_PREFIX} result warnings={len(warnings)}")
 
     result = {
-        "summary": summary,
         "selected_area_id": area_id_value,
         "selected_area_name": area_name_value,
         "date_range_start": start_date,
@@ -281,6 +340,7 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         "suggest_overview": suggest_overview,
         "warnings": warnings,
     }
+    _append_result_log(input_payload=input, context=context, result=result)
     # print(f"{DEBUG_PREFIX} final_result={json.dumps(result, ensure_ascii=False, default=str)}")
     return result
 
@@ -297,6 +357,48 @@ def _resolve_date_range(*, start_date: str, end_date: str) -> tuple[str, str]:
         raise CapabilityExecutionError(code="invalid_input", message="start_date 不能晚于 end_date")
 
     return resolved_start.strftime("%Y-%m-%d"), resolved_end.strftime("%Y-%m-%d")
+
+
+def _append_result_log(*, input_payload: dict[str, Any], context: dict[str, Any], result: dict[str, Any]) -> None:
+    pass
+    # log_dir = Path(__file__).resolve().parent / RESULT_LOG_DIR_NAME
+    # log_file = log_dir / RESULT_LOG_FILE_NAME
+    # record = {
+    #     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    #     "capability": "get_base_basic_data",
+    #     "user_id": str(context.get("user_id") or "").strip(),
+    #     "input": input_payload,
+    #     "result": result,
+    # }
+
+    # try:
+    #     log_dir.mkdir(parents=True, exist_ok=True)
+    #     with log_file.open("a", encoding="utf-8") as fp:
+    #         fp.write(json.dumps(record, ensure_ascii=False, default=str))
+    #         fp.write("\n")
+    # except Exception as exc:  # pragma: no cover - best effort logging
+    #     print(f"{DEBUG_PREFIX} write_result_log_failed error={exc.__class__.__name__}: {str(exc)}")
+
+
+def _append_api_call_log(*, record: dict[str, Any]) -> None:
+    pass
+    # log_dir = Path(__file__).resolve().parent / RESULT_LOG_DIR_NAME
+    # log_file = log_dir / API_CALL_LOG_FILE_NAME
+
+    # try:
+    #     log_dir.mkdir(parents=True, exist_ok=True)
+    #     with log_file.open("a", encoding="utf-8") as fp:
+    #         fp.write(json.dumps(record, ensure_ascii=False, default=str))
+    #         fp.write("\n")
+    # except Exception as exc:  # pragma: no cover - best effort logging
+    #     print(f"{DEBUG_PREFIX} write_api_log_failed error={exc.__class__.__name__}: {str(exc)}")
+
+
+def _raw_text_preview(value: Any, *, limit: int = 4000) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}...(truncated)"
 
 
 def _parse_date(value: str) -> date:
@@ -519,7 +621,7 @@ def _fetch_rice_stage(
     preset_payload = _fetch_optional(
         client=client,
         path="/aipp/getDevicePresets",
-        params={"deviceNum": ricestage_num},
+        params={"deviceNum": ricestage_num, "date": end_date},
         empty_condition=False,
         label="生育期点位预设",
         warnings=warnings,
@@ -563,12 +665,24 @@ def _build_met_overview(data: Any) -> dict[str, Any]:
 def _build_insect_overview(data: Any) -> dict[str, Any]:
     # 按 ScreenView.vue 保持原始字段口径，不在 capability 内做统计聚合
     if not isinstance(data, dict):
-        return {"xticks": [], "ehm": [], "dzjym": [], "hefs": []}
+        return {
+            "xticks": [],
+            "ehm": [],
+            "dzjym": [],
+            "hefs": [],
+            "all_species_aggregate": {
+                "species": [],
+                "total_cumulative": 0,
+                "global_max": 0,
+            },
+        }
+    aggregate = _build_insect_aggregate(data)
     return {
         "xticks": _as_list(data.get("xticks")),
         "ehm": _as_list(data.get("ehm")),
         "dzjym": _as_list(data.get("dzjym")),
         "hefs": _as_list(data.get("hefs")),
+        "all_species_aggregate": aggregate,
     }
 
 
@@ -595,30 +709,69 @@ def _as_list(value: Any) -> list[Any]:
 def _build_suggest_overview(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         return {
-            "sugF_latest": None,
-            "sugD_latest": None,
-            "sugI_latest": None,
-            "sug_data": [None, None, None],
+            "sugF": [],
+            "sugD": [],
+            "sugI": [],
+            "sug_data": [[], [], []],
         }
 
-    sug_f_latest = _extract_latest_suggestion(data.get("sugF"))
-    sug_d_latest = _extract_latest_suggestion(data.get("sugD"))
-    sug_i_latest = _extract_latest_suggestion(data.get("sugI"))
+    sug_f_all = _normalize_suggest_list(data.get("sugF"))
+    sug_d_all = _normalize_suggest_list(data.get("sugD"))
+    sug_i_all = _normalize_suggest_list(data.get("sugI"))
     return {
-        "sugF_latest": sug_f_latest,
-        "sugD_latest": sug_d_latest,
-        "sugI_latest": sug_i_latest,
-        "sug_data": [sug_f_latest, sug_d_latest, sug_i_latest],
+        "sugF": sug_f_all,
+        "sugD": sug_d_all,
+        "sugI": sug_i_all,
+        "sug_data": [sug_f_all, sug_d_all, sug_i_all],
     }
 
 
-def _extract_latest_suggestion(value: Any) -> Any:
+def _normalize_suggest_list(value: Any) -> list[Any]:
     if not isinstance(value, list):
-        return None
-    filtered = _remove_none_like_frontend(value)
-    if not filtered:
-        return None
-    return filtered[-1]
+        return []
+    return _remove_none_like_frontend(value)
+
+
+def _build_insect_aggregate(data: dict[str, Any]) -> dict[str, Any]:
+    species_stats: list[dict[str, Any]] = []
+    total_cumulative = 0
+    global_max = 0.0
+
+    for key, value in data.items():
+        if key == "xticks" or not isinstance(value, list):
+            continue
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            series = item.get("data")
+            if not isinstance(series, list):
+                continue
+
+            numbers = [num for num in (_to_float(cell) for cell in series) if num is not None]
+            cumulative = _round_number(sum(numbers)) if numbers else 0
+            max_value = _round_number(max(numbers)) if numbers else 0
+
+            total_cumulative += cumulative if isinstance(cumulative, (int, float)) else 0
+            if isinstance(max_value, (int, float)):
+                global_max = max(global_max, float(max_value))
+
+            species_stats.append(
+                {
+                    "name": name,
+                    "key": key,
+                    "cumulative": cumulative,
+                    "max": max_value,
+                }
+            )
+
+    return {
+        "species": species_stats,
+        "total_cumulative": _round_number(float(total_cumulative)),
+        "global_max": _round_number(global_max),
+    }
 
 
 def _remove_none_like_frontend(value: list[Any]) -> list[Any]:
@@ -840,6 +993,3 @@ def _coerce_int(value: Any, *, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-
