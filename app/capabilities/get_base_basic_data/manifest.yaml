@@ -1,6 +1,6 @@
 ﻿name: get_base_basic_data
 kind: tool
-description: 按当前登录用户可见基地查询核心信息（温湿度、虫情、生育期、农事建议）
+description: 按当前登录用户可见基地查询核心信息；天气和生育期历史按基地设备绑定履历解析
 
 method: POST
 path: /capabilities/get_base_basic_data
@@ -44,6 +44,10 @@ output_schema:
       type: string
     date_range_end:
       type: string
+    query_mode:
+      type: string
+      enum:
+        - area
     device_refs:
       type: object
       additionalProperties: true
@@ -62,6 +66,16 @@ output_schema:
     suggest_overview:
       type: object
       additionalProperties: true
+    module_statuses:
+      type: object
+      additionalProperties: false
+      properties:
+        weather:
+          type: string
+        rice_stage:
+          type: string
+        rice_stage_preset:
+          type: string
     warnings:
       type: array
       items:

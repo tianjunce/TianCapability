@@ -25,4 +25,5 @@ coverage.xml
 
 # Runtime cache
 app/capabilities/get_weather/.cache/
+app/capabilities/get_base_basic_data/log/
 runtime-data/

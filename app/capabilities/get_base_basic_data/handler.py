@@ -26,8 +26,6 @@ FETCH_AREAS_LABEL = "查询用户基地列表"
 FETCH_DASHBOARD_LABEL = "查询基地数据"
 FORMAT_RESULT_LABEL = "整理基地结果"
 
-SPECIAL_SCREEN_RICESTAGE_IDS = {"11", "330727001"}
-
 SECRET_KEY = "jlsdjfWeer12341"
 ALGORITHM = "HS256"
 DEBUG_PREFIX = "[capability:get_base_basic_data]"
@@ -273,11 +271,19 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
     suggest_num = str(selected_area.get("suggest_num") or "").strip()
     # print(f"{DEBUG_PREFIX} device_refs met_num={met_num!r} insects_num={insects_num!r} ricestage_num={ricestage_num!r}")
 
-    met_data = _fetch_optional(
+    history_start_time, history_end_time = _area_history_time_range(
+        start_date=start_date,
+        end_date=end_date,
+    )
+    met_data, met_status = _fetch_area_optional(
         client=client,
-        path="/screen/getMet",
-        params={"deviceNum": met_num, "startTime": start_date, "endTime": end_date},
-        empty_condition=not met_num,
+        path="/screen/getAreaMet",
+        params={
+            "areaId": area_id_value,
+            "startTime": history_start_time,
+            "endTime": history_end_time,
+            "includeBindingMeta": False,
+        },
         label="温湿度",
         warnings=warnings,
     )
@@ -289,9 +295,9 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         label="虫情",
         warnings=warnings,
     )
-    rice_stage_data, stage_meta = _fetch_rice_stage(
+    rice_stage_data, stage_meta = _fetch_area_rice_stage(
         client=client,
-        ricestage_num=ricestage_num,
+        area_id=area_id_value,
         start_date=start_date,
         end_date=end_date,
         warnings=warnings,
@@ -309,7 +315,7 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
     writer.success(FETCH_DASHBOARD_STEP_ID, FETCH_DASHBOARD_LABEL)
 
     writer.running(FORMAT_RESULT_STEP_ID, FORMAT_RESULT_LABEL)
-    met_overview = _build_met_overview(met_data)
+    met_overview = _build_met_overview(met_data, binding_status=met_status)
     insect_overview = _build_insect_overview(insect_data)
     rice_stage_overview = _build_rice_stage_overview(rice_stage_data, stage_meta=stage_meta)
     suggest_overview = _build_suggest_overview(suggest_data)
@@ -327,6 +333,7 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         "selected_area_name": area_name_value,
         "date_range_start": start_date,
         "date_range_end": end_date,
+        "query_mode": "area",
         "device_refs": {
             "met_num": met_num,
             "insects_num": insects_num,
@@ -338,6 +345,11 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         "insect_overview": insect_overview,
         "rice_stage_overview": rice_stage_overview,
         "suggest_overview": suggest_overview,
+        "module_statuses": {
+            "weather": met_status,
+            "rice_stage": str(stage_meta.get("binding_status") or "NORMAL"),
+            "rice_stage_preset": str(stage_meta.get("preset_status") or "NORMAL"),
+        },
         "warnings": warnings,
     }
     _append_result_log(input_payload=input, context=context, result=result)
@@ -360,38 +372,38 @@ def _resolve_date_range(*, start_date: str, end_date: str) -> tuple[str, str]:
 
 
 def _append_result_log(*, input_payload: dict[str, Any], context: dict[str, Any], result: dict[str, Any]) -> None:
-    pass
-    # log_dir = Path(__file__).resolve().parent / RESULT_LOG_DIR_NAME
-    # log_file = log_dir / RESULT_LOG_FILE_NAME
-    # record = {
-    #     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    #     "capability": "get_base_basic_data",
-    #     "user_id": str(context.get("user_id") or "").strip(),
-    #     "input": input_payload,
-    #     "result": result,
-    # }
+    # pass
+    log_dir = Path(__file__).resolve().parent / RESULT_LOG_DIR_NAME
+    log_file = log_dir / RESULT_LOG_FILE_NAME
+    record = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "capability": "get_base_basic_data",
+        "user_id": str(context.get("user_id") or "").strip(),
+        "input": input_payload,
+        "result": result,
+    }
 
-    # try:
-    #     log_dir.mkdir(parents=True, exist_ok=True)
-    #     with log_file.open("a", encoding="utf-8") as fp:
-    #         fp.write(json.dumps(record, ensure_ascii=False, default=str))
-    #         fp.write("\n")
-    # except Exception as exc:  # pragma: no cover - best effort logging
-    #     print(f"{DEBUG_PREFIX} write_result_log_failed error={exc.__class__.__name__}: {str(exc)}")
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with log_file.open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(record, ensure_ascii=False, default=str))
+            fp.write("\n")
+    except Exception as exc:  # pragma: no cover - best effort logging
+        print(f"{DEBUG_PREFIX} write_result_log_failed error={exc.__class__.__name__}: {str(exc)}")
 
 
 def _append_api_call_log(*, record: dict[str, Any]) -> None:
-    pass
-    # log_dir = Path(__file__).resolve().parent / RESULT_LOG_DIR_NAME
-    # log_file = log_dir / API_CALL_LOG_FILE_NAME
+    # pass
+    log_dir = Path(__file__).resolve().parent / RESULT_LOG_DIR_NAME
+    log_file = log_dir / API_CALL_LOG_FILE_NAME
 
-    # try:
-    #     log_dir.mkdir(parents=True, exist_ok=True)
-    #     with log_file.open("a", encoding="utf-8") as fp:
-    #         fp.write(json.dumps(record, ensure_ascii=False, default=str))
-    #         fp.write("\n")
-    # except Exception as exc:  # pragma: no cover - best effort logging
-    #     print(f"{DEBUG_PREFIX} write_api_log_failed error={exc.__class__.__name__}: {str(exc)}")
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with log_file.open("a", encoding="utf-8") as fp:
+            fp.write(json.dumps(record, ensure_ascii=False, default=str))
+            fp.write("\n")
+    except Exception as exc:  # pragma: no cover - best effort logging
+        print(f"{DEBUG_PREFIX} write_api_log_failed error={exc.__class__.__name__}: {str(exc)}")
 
 
 def _raw_text_preview(value: Any, *, limit: int = 4000) -> str:
@@ -412,6 +424,16 @@ def _offset_date(value: str, *, days: int) -> str:
     return (_parse_date(value) + timedelta(days=days)).strftime("%Y-%m-%d")
 
 
+def _area_history_time_range(*, start_date: str, end_date: str) -> tuple[str, str]:
+    """Convert the inclusive input dates to a local-time half-open range."""
+    start = _parse_date(start_date)
+    end_exclusive = _parse_date(end_date) + timedelta(days=1)
+    return (
+        f"{start.strftime('%Y-%m-%d')} 00:00:00",
+        f"{end_exclusive.strftime('%Y-%m-%d')} 00:00:00",
+    )
+
+
 def _unwrap_api_payload(payload: Any, *, path: str) -> Any:
     if not isinstance(payload, dict):
         return payload
@@ -419,7 +441,9 @@ def _unwrap_api_payload(payload: Any, *, path: str) -> Any:
     code = payload.get("code")
     if code not in (None, 0, 200, "200"):
         message = str(payload.get("msg") or payload.get("message") or f"接口调用失败：{path}").strip()
-        raise CapabilityExecutionError(code="upstream_request_failed", message=message)
+        data = payload.get("data")
+        error_code = str(data.get("errorCode") or "").strip() if isinstance(data, dict) else ""
+        raise CapabilityExecutionError(code=error_code or "upstream_request_failed", message=message)
 
     if "data" in payload:
         return payload.get("data")
@@ -593,36 +617,79 @@ def _fetch_optional(
     return None
 
 
-def _fetch_rice_stage(
+def _fetch_area_optional(
     *,
     client: RiceApiClient,
-    ricestage_num: str,
+    path: str,
+    params: dict[str, Any],
+    label: str,
+    warnings: list[str],
+) -> tuple[Any, str]:
+    """Read one area-scoped module without falling back to current device fields."""
+    try:
+        payload = client.get_json(path, params=params, label=label)
+        data = _unwrap_api_payload(payload, path=path)
+    except CapabilityExecutionError as exc:
+        status = _status_from_error_code(exc.code)
+        warnings.append(f"{label}：{status}（{exc.message}）")
+        return None, status
+    except requests.RequestException as exc:
+        warnings.append(f"{label}查询失败：{str(exc)}")
+        return None, "ERROR"
+
+    status = _coverage_status(data)
+    if status == "PARTIAL_COVERAGE":
+        warnings.append(f"{label}仅覆盖部分查询时间（PARTIAL_COVERAGE）")
+    elif status == "NOT_CONFIGURED":
+        warnings.append(f"{label}未配置有效设备绑定（NOT_CONFIGURED）")
+    elif status == "NEEDS_REVIEW":
+        warnings.append(f"{label}设备绑定需要人工确认（NEEDS_REVIEW）")
+        return None, status
+    elif status == "DATA_INCONSISTENT":
+        warnings.append(f"{label}设备绑定数据不一致（DATA_INCONSISTENT）")
+        return None, status
+    return data, status
+
+
+def _coverage_status(data: Any) -> str:
+    if not isinstance(data, dict):
+        return "NORMAL"
+    coverage = data.get("coverage")
+    if not isinstance(coverage, dict):
+        return "NORMAL"
+    status = str(coverage.get("status") or "NORMAL").strip().upper()
+    return status or "NORMAL"
+
+
+def _status_from_error_code(error_code: str) -> str:
+    normalized = str(error_code or "").strip().upper()
+    status_by_error = {
+        "RICE_STAGE_BINDING_NEEDS_MANUAL_REVIEW": "NEEDS_REVIEW",
+        "RICE_STAGE_BINDING_NOT_AVAILABLE": "NOT_CONFIGURED",
+        "BINDING_DATA_INCONSISTENT": "DATA_INCONSISTENT",
+        "BOUNDARY_DATA_INCONSISTENT": "BOUNDARY_DATA_INCONSISTENT",
+        "BOUNDARY_NOT_CONFIGURED": "NOT_CONFIGURED",
+        "BOUNDARY_COVERAGE_GAP": "BOUNDARY_COVERAGE_GAP",
+        "NO_PERMISSION": "NO_PERMISSION",
+        "AREA_NOT_FOUND": "AREA_NOT_FOUND",
+    }
+    return status_by_error.get(normalized, normalized or "ERROR")
+
+
+def _fetch_area_rice_stage(
+    *,
+    client: RiceApiClient,
+    area_id: str,
     start_date: str,
     end_date: str,
     warnings: list[str],
 ) -> tuple[Any, dict[str, Any]]:
-    if not ricestage_num:
-        warnings.append("生育期缺少设备编号，已跳过")
-        return None, {}
-
-    if ricestage_num in SPECIAL_SCREEN_RICESTAGE_IDS:
-        payload = _fetch_optional(
-            client=client,
-            path="/screen/getRiceStage",
-            params={"deviceNum": ricestage_num, "startTime": start_date, "endTime": end_date},
-            empty_condition=False,
-            label="生育期",
-            warnings=warnings,
-        )
-        return payload, {"source": "screen"}
-
     preset = ""
     crop = ""
-    preset_payload = _fetch_optional(
+    preset_payload, preset_status = _fetch_area_optional(
         client=client,
-        path="/aipp/getDevicePresets",
-        params={"deviceNum": ricestage_num, "date": end_date},
-        empty_condition=False,
+        path="/aipp/area-device-presets",
+        params={"areaId": area_id, "date": end_date},
         label="生育期点位预设",
         warnings=warnings,
     )
@@ -633,32 +700,54 @@ def _fetch_rice_stage(
             preset = str(first_item.get("preset") or "").strip()
             crop = str(first_item.get("crop") or "").strip()
 
-    params = {
-        "deviceNum": ricestage_num,
-        "preset": preset,
-        "startTime": start_date,
-        "endTime": end_date,
-    }
+    if preset_status in {"NEEDS_REVIEW", "DATA_INCONSISTENT", "NO_PERMISSION", "AREA_NOT_FOUND"}:
+        return None, {
+            "source": "area",
+            "preset": preset,
+            "crop": crop,
+            "binding_status": preset_status,
+            "preset_status": preset_status,
+        }
 
-    payload = _fetch_optional(
+    history_start_time, history_end_time = _area_history_time_range(
+        start_date=start_date,
+        end_date=end_date,
+    )
+    params = {
+        "areaId": area_id,
+        "startTime": history_start_time,
+        "endTime": history_end_time,
+        "includeBindingMeta": False,
+    }
+    if preset:
+        params["preset"] = preset
+
+    payload, binding_status = _fetch_area_optional(
         client=client,
-        path="/aipp/getRiceStage",
+        path="/aipp/area-rice-stage",
         params=params,
-        empty_condition=False,
         label="生育期",
         warnings=warnings,
     )
-    return payload, {"source": "aipp", "preset": preset, "crop": crop}
+    return payload, {
+        "source": "area",
+        "preset": preset,
+        "crop": crop,
+        "binding_status": binding_status,
+        "preset_status": preset_status,
+    }
 
 
-def _build_met_overview(data: Any) -> dict[str, Any]:
+def _build_met_overview(data: Any, *, binding_status: str) -> dict[str, Any]:
     # 按 ScreenView.vue 保持原始字段口径，不在 capability 内做统计聚合
     if not isinstance(data, dict):
-        return {"xticks": [], "temp": [], "hum": []}
+        return {"xticks": [], "temp": [], "hum": [], "binding_status": binding_status, "coverage": {}}
     return {
         "xticks": _as_list(data.get("xticks")),
         "temp": _as_list(data.get("temp")),
         "hum": _as_list(data.get("hum")),
+        "binding_status": binding_status,
+        "coverage": data.get("coverage") if isinstance(data.get("coverage"), dict) else {},
     }
 
 
@@ -699,6 +788,9 @@ def _build_rice_stage_overview(data: Any, *, stage_meta: dict[str, Any]) -> dict
         "source": str(stage_meta.get("source") or ""),
         "preset": str(stage_meta.get("preset") or ""),
         "crop": str(stage_meta.get("crop") or ""),
+        "binding_status": str(stage_meta.get("binding_status") or "NORMAL"),
+        "preset_status": str(stage_meta.get("preset_status") or "NORMAL"),
+        "coverage": data.get("coverage") if isinstance(data, dict) and isinstance(data.get("coverage"), dict) else {},
     }
 
 
