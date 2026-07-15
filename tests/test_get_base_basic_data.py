@@ -60,9 +60,22 @@ def _normal_responses(area_id="12"):
         "/screen/getAreaMet": {
             "code": 200,
             "data": {
-                "xticks": ["2026-07-14", "2026-07-15"],
-                "temp": [{"name": "平均", "data": [21.1, 31.2]}],
-                "hum": [],
+                "rows": [
+                    {
+                        "date": "2026-07-15",
+                        "metrics": [
+                            {"key": "airTemperature", "mean": 31.2, "max": 33.0, "min": 29.0},
+                            {"key": "airHumidity", "mean": 80.0, "max": 85.0, "min": 75.0},
+                        ],
+                    },
+                    {
+                        "date": "2026-07-14",
+                        "metrics": [
+                            {"key": "airTemperature", "mean": 21.1, "max": 22.0, "min": 20.0},
+                            {"key": "airHumidity", "mean": 90.9, "max": 94.2, "min": 83.2},
+                        ],
+                    },
+                ],
                 "coverage": coverage,
             },
         },
@@ -70,7 +83,10 @@ def _normal_responses(area_id="12"):
         "/aipp/area-device-presets": {
             "code": 200,
             "data": {
-                "presets": [{"preset": "1", "crop": "早稻"}],
+                "presets": [
+                    {"preset": "1", "crop": "早稻"},
+                    {"preset": "2", "crop": "早稻"},
+                ],
                 "coverage": coverage,
             },
         },
@@ -132,6 +148,17 @@ class GetBaseBasicDataTests(unittest.TestCase):
         self.assertEqual(result["query_mode"], "area")
         self.assertEqual(result["module_statuses"]["weather"], "NORMAL")
         self.assertEqual(result["device_refs"]["met_num"], "CURRENT_WEATHER_ONLY")
+        self.assertEqual(result["met_overview"]["data_status"], "NORMAL")
+        met_axis = result["time_axes"][result["met_overview"]["axis_ref"]]
+        self.assertEqual(met_axis["start"], "2026-07-14")
+        self.assertEqual(met_axis["end"], "2026-07-15")
+        self.assertEqual(met_axis["count"], 2)
+        self.assertEqual(result["rice_stage_overview"]["preset"], "1")
+        self.assertEqual(result["rice_stage_overview"]["preset_selection"], "FIRST_AVAILABLE")
+        self.assertEqual(
+            result["rice_stage_overview"]["available_presets"],
+            [{"preset": "1", "crop": "早稻"}, {"preset": "2", "crop": "早稻"}],
+        )
 
     def test_area_name_is_resolved_to_id_before_history_queries(self):
         client = _Client(_normal_responses())
@@ -155,6 +182,111 @@ class GetBaseBasicDataTests(unittest.TestCase):
         self.assertEqual(result["module_statuses"]["weather"], "PARTIAL_COVERAGE")
         self.assertTrue(result["met_overview"]["temp"])
         self.assertTrue(any("PARTIAL_COVERAGE" in warning for warning in result["warnings"]))
+
+    def test_weather_rows_metrics_are_sorted_and_preserve_nulls(self):
+        warnings = []
+        overview = handler._build_met_overview(
+            {
+                "rows": [
+                    {
+                        "date": "2026-06-26",
+                        "metrics": [
+                            {"key": "airTemperature", "max": None, "mean": 20.0, "min": 18.0},
+                            {"key": "airHumidity", "max": 95.0, "mean": None, "min": 80.0},
+                        ],
+                    },
+                    {
+                        "date": "2026-06-25",
+                        "metrics": [
+                            {"key": "airTemperature", "max": 22.0, "mean": 19.2, "min": 17.0},
+                            {"key": "airHumidity", "max": 94.2, "mean": 90.9, "min": 83.2},
+                        ],
+                    },
+                ],
+                "coverage": {"status": "NORMAL", "gaps": []},
+            },
+            binding_status="NORMAL",
+            warnings=warnings,
+        )
+
+        self.assertEqual(overview["xticks"], ["2026-06-25", "2026-06-26"])
+        self.assertEqual(overview["temp"][0], {"name": "最高温度", "data": [22.0, None]})
+        self.assertEqual(overview["temp"][1], {"name": "平均温度", "data": [19.2, 20.0]})
+        self.assertEqual(overview["temp"][2], {"name": "最低温度", "data": [17.0, 18.0]})
+        self.assertEqual(overview["hum"][0], {"name": "最高湿度", "data": [94.2, 95.0]})
+        self.assertEqual(overview["hum"][1], {"name": "平均湿度", "data": [90.9, None]})
+        self.assertEqual(overview["hum"][2], {"name": "最低湿度", "data": [83.2, 80.0]})
+        self.assertTrue(
+            all(len(item["data"]) == len(overview["xticks"]) for item in [*overview["temp"], *overview["hum"]])
+        )
+        self.assertEqual(overview["coverage"], {"status": "NORMAL", "gaps": []})
+        self.assertEqual(overview["data_status"], "NORMAL")
+        self.assertEqual(overview["latest_data_date"], "2026-06-26")
+        self.assertEqual(overview["data_date_count"], 2)
+        self.assertEqual(overview["empty_date_count"], 0)
+        self.assertEqual(warnings, [])
+
+    def test_weather_partial_data_has_independent_status_and_warning(self):
+        warnings = []
+        overview = handler._build_met_overview(
+            {
+                "rows": [
+                    {"date": "2026-06-28", "metrics": []},
+                    {"date": "2026-06-29", "metrics": [{"key": "airTemperature", "mean": 25.0}]},
+                ],
+                "coverage": {"status": "NORMAL", "gaps": []},
+            },
+            binding_status="NORMAL",
+            warnings=warnings,
+        )
+
+        self.assertEqual(overview["binding_status"], "NORMAL")
+        self.assertEqual(overview["coverage"]["status"], "NORMAL")
+        self.assertEqual(overview["data_status"], "PARTIAL_DATA")
+        self.assertEqual(overview["data_date_count"], 1)
+        self.assertEqual(overview["empty_date_count"], 1)
+        self.assertEqual(overview["latest_data_date"], "2026-06-29")
+        self.assertTrue(any("部分日期没有有效温湿度数据" in item for item in warnings))
+        self.assertTrue(any("airHumidity" in item for item in overview["schema_warnings"]))
+
+    def test_weather_all_empty_is_no_data_even_when_binding_is_normal(self):
+        overview = handler._build_met_overview(
+            {
+                "rows": [
+                    {
+                        "date": "2026-06-30",
+                        "metrics": [
+                            {"key": "airTemperature", "max": None, "mean": None, "min": None},
+                            {"key": "airHumidity", "max": None, "mean": None, "min": None},
+                        ],
+                    }
+                ],
+                "coverage": {"status": "NORMAL", "gaps": []},
+            },
+            binding_status="NORMAL",
+        )
+
+        self.assertEqual(overview["binding_status"], "NORMAL")
+        self.assertEqual(overview["coverage"]["status"], "NORMAL")
+        self.assertEqual(overview["data_status"], "NO_DATA")
+        self.assertEqual(overview["latest_data_date"], "")
+        self.assertEqual(overview["data_date_count"], 0)
+        self.assertEqual(overview["empty_date_count"], 1)
+
+    def test_legacy_weather_shape_remains_compatible(self):
+        legacy = {
+            "xticks": ["2026-07-14", "2026-07-15"],
+            "temp": [{"name": "平均温度", "data": [21.1, None]}],
+            "hum": [{"name": "平均湿度", "data": [80.0, 81.0]}],
+            "coverage": {"status": "NORMAL", "gaps": []},
+        }
+
+        overview = handler._build_met_overview(legacy, binding_status="NORMAL")
+
+        self.assertEqual(overview["xticks"], legacy["xticks"])
+        self.assertEqual(overview["temp"], legacy["temp"])
+        self.assertEqual(overview["hum"], legacy["hum"])
+        self.assertEqual(overview["data_status"], "NORMAL")
 
     def test_needs_review_does_not_fallback_and_keeps_weather(self):
         responses = _normal_responses(area_id="11")

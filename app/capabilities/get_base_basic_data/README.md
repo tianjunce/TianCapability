@@ -24,9 +24,13 @@
 
 不使用 `23:59:59`，也不经过 UTC 转换。preset 使用 `end_date` 查询该自然日有效设备的点位。
 
+天气接口优先解析 `/screen/getAreaMet` 的 `rows[].metrics` 结构，并继续输出兼容的 `temp`、`hum` 三序列。`coverage.status` 与 `binding_status` 只表示设备绑定履历覆盖；`data_status` 独立表示实际温湿度数据完整度（`NORMAL`、`PARTIAL_DATA`、`NO_DATA`）。空值保持为 `null`，不会转换成 `0`。
+
+生育期概览当前仍使用 `/aipp/area-device-presets` 返回的第一项 preset，并在 `rice_stage_overview` 中通过 `preset_selection=FIRST_AVAILABLE` 明确该策略，同时返回完整 `available_presets`。概览结果只代表所选第一点位，不代表所有点位；本轮不新增 preset 输入参数。
+
 ## 返回和异常
 
-原有天气、生育期、虫情、农事建议和紧凑时间轴字段保持不变；新增可选的 `query_mode=area`、`module_statuses`，天气和生育期块也附带 `binding_status` 与 `coverage`。
+原有天气、生育期、虫情、农事建议和紧凑时间轴字段保持不变；新增可选的 `query_mode=area`、`module_statuses`，天气和生育期块也附带 `binding_status` 与 `coverage`。天气块额外提供 `data_status`、`latest_data_date`、`data_date_count`、`empty_date_count` 和可选的 `schema_warnings`。
 
 - `NORMAL`：正常返回。
 - `PARTIAL_COVERAGE`：保留已有数据并增加 warning。

@@ -315,7 +315,11 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
     writer.success(FETCH_DASHBOARD_STEP_ID, FETCH_DASHBOARD_LABEL)
 
     writer.running(FORMAT_RESULT_STEP_ID, FORMAT_RESULT_LABEL)
-    met_overview = _build_met_overview(met_data, binding_status=met_status)
+    met_overview = _build_met_overview(
+        met_data,
+        binding_status=met_status,
+        warnings=warnings,
+    )
     insect_overview = _build_insect_overview(insect_data)
     rice_stage_overview = _build_rice_stage_overview(rice_stage_data, stage_meta=stage_meta)
     suggest_overview = _build_suggest_overview(suggest_data)
@@ -686,6 +690,7 @@ def _fetch_area_rice_stage(
 ) -> tuple[Any, dict[str, Any]]:
     preset = ""
     crop = ""
+    available_presets: list[dict[str, str]] = []
     preset_payload, preset_status = _fetch_area_optional(
         client=client,
         path="/aipp/area-device-presets",
@@ -696,7 +701,15 @@ def _fetch_area_rice_stage(
     if isinstance(preset_payload, dict):
         presets = preset_payload.get("presets")
         if isinstance(presets, list) and presets:
-            first_item = presets[0] if isinstance(presets[0], dict) else {}
+            available_presets = [
+                {
+                    "preset": str(item.get("preset") or "").strip(),
+                    "crop": str(item.get("crop") or "").strip(),
+                }
+                for item in presets
+                if isinstance(item, dict)
+            ]
+            first_item = available_presets[0] if available_presets else {}
             preset = str(first_item.get("preset") or "").strip()
             crop = str(first_item.get("crop") or "").strip()
 
@@ -705,6 +718,8 @@ def _fetch_area_rice_stage(
             "source": "area",
             "preset": preset,
             "crop": crop,
+            "available_presets": available_presets,
+            "preset_selection": "FIRST_AVAILABLE",
             "binding_status": preset_status,
             "preset_status": preset_status,
         }
@@ -733,22 +748,161 @@ def _fetch_area_rice_stage(
         "source": "area",
         "preset": preset,
         "crop": crop,
+        "available_presets": available_presets,
+        "preset_selection": "FIRST_AVAILABLE",
         "binding_status": binding_status,
         "preset_status": preset_status,
     }
 
 
-def _build_met_overview(data: Any, *, binding_status: str) -> dict[str, Any]:
-    # 按 ScreenView.vue 保持原始字段口径，不在 capability 内做统计聚合
+def _build_met_overview(
+    data: Any,
+    *,
+    binding_status: str,
+    warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    """Normalize area weather rows while preserving the legacy temp/hum contract."""
+    coverage = data.get("coverage") if isinstance(data, dict) and isinstance(data.get("coverage"), dict) else {}
+    schema_warnings: list[str] = []
+
     if not isinstance(data, dict):
-        return {"xticks": [], "temp": [], "hum": [], "binding_status": binding_status, "coverage": {}}
+        xticks: list[Any] = []
+        temp: list[Any] = []
+        hum: list[Any] = []
+    elif isinstance(data.get("rows"), list):
+        rows = [row if isinstance(row, dict) else {} for row in data.get("rows", [])]
+        rows = [
+            row
+            for _index, row in sorted(
+                enumerate(rows),
+                key=lambda item: (str(item[1].get("date") or ""), item[0]),
+            )
+        ]
+        xticks = [row.get("date") for row in rows]
+        temp_max: list[Any] = []
+        temp_mean: list[Any] = []
+        temp_min: list[Any] = []
+        hum_max: list[Any] = []
+        hum_mean: list[Any] = []
+        hum_min: list[Any] = []
+        found_temperature = False
+        found_humidity = False
+
+        for row in rows:
+            metrics = row.get("metrics") if isinstance(row.get("metrics"), list) else []
+            metric_by_key = {
+                str(metric.get("key") or "").strip(): metric
+                for metric in metrics
+                if isinstance(metric, dict) and str(metric.get("key") or "").strip()
+            }
+            temperature = metric_by_key.get("airTemperature")
+            humidity = metric_by_key.get("airHumidity")
+            found_temperature = found_temperature or temperature is not None
+            found_humidity = found_humidity or humidity is not None
+
+            temp_max.append(temperature.get("max") if temperature is not None else None)
+            temp_mean.append(temperature.get("mean") if temperature is not None else None)
+            temp_min.append(temperature.get("min") if temperature is not None else None)
+            hum_max.append(humidity.get("max") if humidity is not None else None)
+            hum_mean.append(humidity.get("mean") if humidity is not None else None)
+            hum_min.append(humidity.get("min") if humidity is not None else None)
+
+        temp = [
+            {"name": "最高温度", "data": temp_max},
+            {"name": "平均温度", "data": temp_mean},
+            {"name": "最低温度", "data": temp_min},
+        ]
+        hum = [
+            {"name": "最高湿度", "data": hum_max},
+            {"name": "平均湿度", "data": hum_mean},
+            {"name": "最低湿度", "data": hum_min},
+        ]
+
+        if rows and not found_temperature:
+            schema_warnings.append("天气响应 Schema warning：rows 中未找到 airTemperature 指标")
+        if rows and not found_humidity:
+            schema_warnings.append("天气响应 Schema warning：rows 中未找到 airHumidity 指标")
+    else:
+        # Compatibility for the legacy getAreaMet response shape.
+        xticks = _as_list(data.get("xticks"))
+        temp = _as_list(data.get("temp"))
+        hum = _as_list(data.get("hum"))
+
+    completeness = _weather_data_completeness(xticks=xticks, temp=temp, hum=hum)
+    if completeness["data_status"] == "PARTIAL_DATA":
+        latest = completeness["latest_data_date"] or "未知日期"
+        schema_warnings.append(
+            f"天气设备绑定正常，但部分日期没有有效温湿度数据；最新有效日期为 {latest}"
+        )
+    elif completeness["data_status"] == "NO_DATA" and xticks:
+        schema_warnings.append("查询日期内没有有效温湿度数据（NO_DATA）")
+
+    if warnings is not None:
+        for warning in schema_warnings:
+            if warning not in warnings:
+                warnings.append(warning)
+
     return {
-        "xticks": _as_list(data.get("xticks")),
-        "temp": _as_list(data.get("temp")),
-        "hum": _as_list(data.get("hum")),
+        "xticks": xticks,
+        "temp": temp,
+        "hum": hum,
         "binding_status": binding_status,
-        "coverage": data.get("coverage") if isinstance(data.get("coverage"), dict) else {},
+        "coverage": coverage,
+        "schema_warnings": schema_warnings,
+        **completeness,
     }
+
+
+def _weather_data_completeness(
+    *,
+    xticks: list[Any],
+    temp: list[Any],
+    hum: list[Any],
+) -> dict[str, Any]:
+    date_count = len(xticks)
+    valid_indexes: list[int] = []
+    series = [
+        item.get("data")
+        for item in [*temp, *hum]
+        if isinstance(item, dict) and isinstance(item.get("data"), list)
+    ]
+    for index in range(date_count):
+        values = [items[index] if index < len(items) else None for items in series]
+        if any(_is_weather_value(value) for value in values):
+            valid_indexes.append(index)
+
+    data_date_count = len(valid_indexes)
+    empty_date_count = date_count - data_date_count
+    if data_date_count == 0:
+        data_status = "NO_DATA"
+    elif empty_date_count > 0:
+        data_status = "PARTIAL_DATA"
+    else:
+        data_status = "NORMAL"
+
+    latest_data_date = ""
+    if valid_indexes:
+        latest_data_date = str(xticks[valid_indexes[-1]] or "").strip()
+    return {
+        "data_status": data_status,
+        "latest_data_date": latest_data_date,
+        "data_date_count": data_date_count,
+        "empty_date_count": empty_date_count,
+    }
+
+
+def _is_weather_value(value: Any) -> bool:
+    if value is None or isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        try:
+            float(value.strip())
+            return bool(value.strip())
+        except ValueError:
+            return False
+    return False
 
 
 def _build_insect_overview(data: Any) -> dict[str, Any]:
@@ -788,6 +942,8 @@ def _build_rice_stage_overview(data: Any, *, stage_meta: dict[str, Any]) -> dict
         "source": str(stage_meta.get("source") or ""),
         "preset": str(stage_meta.get("preset") or ""),
         "crop": str(stage_meta.get("crop") or ""),
+        "available_presets": _as_list(stage_meta.get("available_presets")),
+        "preset_selection": str(stage_meta.get("preset_selection") or "FIRST_AVAILABLE"),
         "binding_status": str(stage_meta.get("binding_status") or "NORMAL"),
         "preset_status": str(stage_meta.get("preset_status") or "NORMAL"),
         "coverage": data.get("coverage") if isinstance(data, dict) and isinstance(data.get("coverage"), dict) else {},
