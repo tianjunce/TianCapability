@@ -26,6 +26,8 @@
 
 天气接口优先解析 `/screen/getAreaMet` 的 `rows[].metrics` 结构，并继续输出兼容的 `temp`、`hum` 三序列。`coverage.status` 与 `binding_status` 只表示设备绑定履历覆盖；`data_status` 独立表示实际温湿度数据完整度（`NORMAL`、`PARTIAL_DATA`、`NO_DATA`）。空值保持为 `null`，不会转换成 `0`。
 
+天气指标先识别四情语义 key（`airTemperature` / `air_temperature`、`airHumidity` / `air_humidity`），再按 `sensorName` 识别管控指标（空气/环境/大气温度与湿度）。`sensor_N` 仅是设备内位置，不用于推断业务类型；`sort` 也不单独参与分类，因此传感器顺序变化不会改变温湿度归类。数值 `0`、`0.0` 均属于有效数据，只有 `None` 视为空值。
+
 生育期概览当前仍使用 `/aipp/area-device-presets` 返回的第一项 preset，并在 `rice_stage_overview` 中通过 `preset_selection=FIRST_AVAILABLE` 明确该策略，同时返回完整 `available_presets`。概览结果只代表所选第一点位，不代表所有点位；本轮不新增 preset 输入参数。
 
 ## 返回和异常
@@ -39,4 +41,4 @@
 - `DATA_INCONSISTENT`：停止使用该模块数据并返回明确状态。
 - `NO_PERMISSION`、`AREA_NOT_FOUND`：保留稳定错误状态和 warning。
 
-单个模块失败不会清空其他模块。已知异常基地缺少可信 RICE_STAGE 履历时，天气仍可返回，生育期和 preset 返回 `NEEDS_REVIEW`。本能力不读取 `monitor_num`。
+单个模块失败不会清空其他模块。当 RiceAI 接口实时返回 RICE_STAGE `NEEDS_REVIEW` 时，天气仍可返回，生育期和 preset 返回空块；Capability 不按固定 `area_id` 推断异常状态。本能力不读取 `monitor_num`。

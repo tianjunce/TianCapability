@@ -790,13 +790,16 @@ def _build_met_overview(
 
         for row in rows:
             metrics = row.get("metrics") if isinstance(row.get("metrics"), list) else []
-            metric_by_key = {
-                str(metric.get("key") or "").strip(): metric
-                for metric in metrics
-                if isinstance(metric, dict) and str(metric.get("key") or "").strip()
-            }
-            temperature = metric_by_key.get("airTemperature")
-            humidity = metric_by_key.get("airHumidity")
+            temperature = None
+            humidity = None
+            for metric in metrics:
+                if not isinstance(metric, dict):
+                    continue
+                metric_kind = _classify_weather_metric(metric)
+                if metric_kind == "temperature" and temperature is None:
+                    temperature = metric
+                elif metric_kind == "humidity" and humidity is None:
+                    humidity = metric
             found_temperature = found_temperature or temperature is not None
             found_humidity = found_humidity or humidity is not None
 
@@ -819,9 +822,9 @@ def _build_met_overview(
         ]
 
         if rows and not found_temperature:
-            schema_warnings.append("天气响应 Schema warning：rows 中未找到 airTemperature 指标")
+            schema_warnings.append("天气响应 Schema warning：rows 中未找到空气温度指标")
         if rows and not found_humidity:
-            schema_warnings.append("天气响应 Schema warning：rows 中未找到 airHumidity 指标")
+            schema_warnings.append("天气响应 Schema warning：rows 中未找到空气湿度指标")
     else:
         # Compatibility for the legacy getAreaMet response shape.
         xticks = _as_list(data.get("xticks"))
@@ -851,6 +854,22 @@ def _build_met_overview(
         "schema_warnings": schema_warnings,
         **completeness,
     }
+
+
+def _classify_weather_metric(metric: dict[str, Any]) -> str | None:
+    """Classify siqing and guankong metrics without assuming sensor position."""
+    normalized_key = str(metric.get("key") or "").strip().replace(" ", "").lower()
+    if normalized_key in {"airtemperature", "air_temperature"}:
+        return "temperature"
+    if normalized_key in {"airhumidity", "air_humidity"}:
+        return "humidity"
+
+    normalized_name = str(metric.get("sensorName") or "").strip().replace(" ", "").lower()
+    if normalized_name in {"空气温度", "环境温度", "大气温度"}:
+        return "temperature"
+    if normalized_name in {"空气湿度", "环境湿度", "大气湿度"}:
+        return "humidity"
+    return None
 
 
 def _weather_data_completeness(
@@ -892,17 +911,7 @@ def _weather_data_completeness(
 
 
 def _is_weather_value(value: Any) -> bool:
-    if value is None or isinstance(value, bool):
-        return False
-    if isinstance(value, (int, float)):
-        return True
-    if isinstance(value, str):
-        try:
-            float(value.strip())
-            return bool(value.strip())
-        except ValueError:
-            return False
-    return False
+    return value is not None
 
 
 def _build_insect_overview(data: Any) -> dict[str, Any]:
