@@ -353,7 +353,7 @@ async def handle(input: dict[str, Any], context: dict[str, Any]) -> dict[str, An
         "warnings": warnings,
     }
     _append_result_log(input_payload=input, context=context, result=result)
-    # print(f"{DEBUG_PREFIX} final_result={json.dumps(result, ensure_ascii=False, default=str)}")
+    print(f"{DEBUG_PREFIX} final_result={json.dumps(result, ensure_ascii=False, default=str)}")
     return result
 
 
